@@ -29,3 +29,14 @@ Hosts affirm they may publish the art. This is a self-declaration, not a license
 
 ## Social profile URL preview
 Stored social URLs are self-reported, private per account, and unverified. Allowlisted provider hostname/path, HTTPS, and no query/fragment/port/userinfo prevent common unsafe URL forms; opening an external website is at the user's discretion. **No provider OAuth, proof of channel ownership, or access tokens are involved.** Real social connections must use official consent and server-managed token storage, revocation, state/PKCE as required, rate limiting, and platform review.
+
+## October phone authenticator MFA (preview; not publicly security audited)
+
+- **True two factors** are RetroRelay password plus a separately configured TOTP authenticator on the user's phone. **Password plus PIN is not MFA**. SMS/phone-number texting and standalone PIN login are **not implemented**.
+- A verified 30-second TOTP or unused 128-bit recovery code is required before the API issues a new full account session. Challenge-only tokens cannot access private endpoints; TOTP steps and recovery codes are single-use. Per-account attempt limits temporarily block excessive guesses.
+- MFA secrets are encrypted using a Fernet key stored in the server's `RETRORELAY_MFA_KEY` environment variable, not the database. There is **no fallback key**: missing or changed key causes MFA operations to fail closed.
+- Server operators must maintain encrypted backups of the database and a **separate confidential backup of that key**. Never copy `.env` or recovery codes into the repository, logs, or chat. Losing the key can lock out enrolled accounts and require administrator intervention.
+- Enabling MFA requires a current account password and a valid code. Disabling it requires the account password and an existing OTP/recovery code. Other sessions are revoked after enabling/disabling it; however, a compromised current session may remain until revoked.
+- **Not yet production hardened:** IP/global traffic limiting, account recovery verification, monitoring and alerts, anti-enumeration, phishing-resistant passkeys, transparent password-breach screening and independent security audit remain outstanding. MFA greatly reduces some credential-theft risks but is not hack-proof.
+
+Track security review and feature readiness in [Issue #9](https://github.com/Cardsmageanime/RetroRelay/issues/9).
