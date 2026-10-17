@@ -150,3 +150,21 @@ For host-only-streamed games, select **Parsec shared-controller remote play**. T
 The desktop application now includes **7 • Social Accounts** where signed-in users can save, open, replace, or delete private links to their Twitch, YouTube, TikTok, Facebook, and Instagram profiles. Each URL is checked against an exact provider HTTPS domain and limited profile URL pattern. The server stores links per RetroRelay account; links are **private to the owner** and **unverified**. Users cannot see other users' links, and this feature does not log into social platforms or transmit passwords or stream keys.
 
 **Future OAuth authorization is separate:** actual provider account linking, streaming/chat permissions, automatic live status, and cross-posting are **not implemented**. They require developer applications, official OAuth authorization, registered callback URLs, consent/privacy policies, and sometimes provider approval. See GitHub Issue #6. Twitch streaming and dual chat remains a separately scoped January update (Issue #3).
+
+## October v0.2 preview: optional phone-authenticator MFA (experimental)
+
+**Status:** implementation under review for October 20, 2026 (Issue #9); do **not** use it as the sole protection for a public production server until security review and deployment testing.
+
+RetroRelay users can choose **Enable phone 2-step** from the Account tab after login. Re-enter the account password, then add the displayed **setup secret** manually to a phone authenticator that supports six-digit, 30-second TOTP (such as Google Authenticator or Microsoft Authenticator). Enter the current phone code to confirm. Save the **eight single-use recovery codes offline** immediately; they will not be displayed again. Future password logins will then require a phone code or an unused recovery code before RetroRelay gives out a normal session.
+
+**Server operator setup (required for account MFA):**
+
+1. Install the server's requirements, including Python `cryptography`.
+2. Generate a persistent encryption key privately: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
+3. For Docker, put `RETRORELAY_MFA_KEY=<generated-key>` in the **private** `.env` file used by Compose; see `.env.example`. For a native process, provide the same environment variable to the hub service.
+4. Keep the key **outside GitHub** and back it up securely. Never regenerate it casually. Losing/rotating it without a migration will prevent enrolled accounts from verifying their codes; the server **fails closed**, not by bypassing MFA.
+5. Use HTTPS for any remotely accessed accounts. Never post the setup key, recovery codes, screenshots of secrets or server environment in an issue.
+
+A **password + PIN** is not genuine MFA because both are information you know. A separate device-local PIN may be considered for convenience, but must never replace a configured phone authenticator at server login. SMS text codes are **not implemented**. Rate limits and OTP single-use checks lower risk, but cannot guarantee nobody's account will be compromised. A public service still requires comprehensive abuse protection, backups, audit, recovery support and independent security review.
+
+Related: [October Account Security Issue #9](https://github.com/Cardsmageanime/RetroRelay/issues/9).
