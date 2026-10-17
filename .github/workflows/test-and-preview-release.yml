@@ -1,0 +1,42 @@
+name: Test and publish initial source-code preview
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m pytest -q
+
+  first-preview-release:
+    needs: tests
+    runs-on: ubuntu-latest
+    if: github.repository == 'Cardsmageanime/RetroRelay'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create initial source-only pre-release if it does not exist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view v0.1.0 >/dev/null 2>&1; then
+            echo 'Preview release v0.1.0 already exists; not replacing it.'
+            exit 0
+          fi
+          git archive --format=zip --output=RetroRelay_Source_v0.1.0.zip HEAD
+          gh release create v0.1.0 RetroRelay_Source_v0.1.0.zip \
+            --target "$GITHUB_SHA" \
+            --title 'RetroRelay v0.1.0 - Early Preview' \
+            --notes-file RELEASE_NOTES.md --prerelease

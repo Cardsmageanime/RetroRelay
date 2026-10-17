@@ -1,0 +1,26 @@
+services:
+  hub:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - hub_data:/appdata
+    expose:
+      - "8751"
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?Configure DOMAIN in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - hub
+volumes:
+  hub_data:
+  caddy_data:
+  caddy_config:

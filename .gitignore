@@ -1,0 +1,25 @@
+# Keep users' accounts, tokens, databases, settings and local builds OUT of GitHub.
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.envdir/
+build/
+dist/
+*.spec
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+*.pem
+*.key
