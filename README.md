@@ -2,6 +2,19 @@
 
 > **Early preview / source code only:** this is not a standalone installer or a ready-to-run public multiplayer network. Do not expose the account server to open registration until security protections are added. See [Security](SECURITY.md) and [Release Notes](RELEASE_NOTES.md).
 
+## Discover, try, and help improve RetroRelay
+
+**Want to share this project with other retro gamers and developers?** Use this public GitHub link: **https://github.com/Cardsmageanime/RetroRelay**.
+
+- ⭐ **Star** the project to bookmark it and support its discoverability.
+- 👀 **Watch** the repository to follow issue and release updates.
+- 🧪 **Try the [v0.1.0 source-code preview](https://github.com/Cardsmageanime/RetroRelay/releases/tag/v0.1.0)** and share what works or needs improvement.
+- 💬 **[Report a bug, request a feature, or share compatibility feedback](https://github.com/Cardsmageanime/RetroRelay/issues)**.
+- 🛠️ **[Read the contribution and safety guide](CONTRIBUTING.md)** before submitting changes.
+- 🗓️ **[Follow the full 2026–2028 roadmap](ROADMAP.md)**. October v0.2 and later features are planned/in review, not released yet.
+
+**Please note:** This repository currently has no software license file. Public visibility does not automatically grant a license for unrestricted reuse or redistribution. Do not upload commercial ROMs, BIOS/firmware, unlicensed character artwork, passwords, private addresses, or access tokens.
+
 **A working Python desktop/client + self-hosted lobby server starter project.** Windows and Linux. The hub coordinates accounts, player matching, waiting rooms, readiness and chat; it does **not** emulate consoles itself or stream gameplay. You must install your preferred supported emulator separately.
 
 **Your boundaries:** Nintendo SNES through Wii U (including GameCube, Wii and listed handhelds); PlayStation 1, 2, 3 and PSP; Sega Genesis/32X/CD/Saturn/Dreamcast; original Xbox and Xbox 360; plus legacy PC-game lobbies. Deliberately **no Nintendo Switch / Switch 2, PlayStation 4 / 5, Xbox One / Series**. ROMs/BIOS/firmware aren't provided.
