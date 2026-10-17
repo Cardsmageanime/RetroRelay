@@ -1,4 +1,4 @@
-name: Controllers and artwork preview release after merge
+name: October v0.2 source preview release after merge
 
 on:
   push:
@@ -36,5 +36,5 @@ jobs:
           git archive --format=zip --output=RetroRelay_Source_v0.2.0.zip HEAD
           gh release create v0.2.0 RetroRelay_Source_v0.2.0.zip \
             --target "$GITHUB_SHA" \
-            --title 'RetroRelay v0.2.0 - Controllers & Game Artwork Preview' \
+            --title 'RetroRelay v0.2.0 - Social, Controllers, Artwork & Phone MFA Preview' \
             --notes-file CONTROLLER_PREVIEW_NOTES.md --prerelease
