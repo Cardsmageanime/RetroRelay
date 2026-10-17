@@ -24,3 +24,11 @@
 
 ## October addition: Social Accounts
 Added a private Social Accounts tab allowing users to save strictly validated, **unverified** HTTPS Twitch/YouTube/TikTok/Facebook/Instagram profile URLs. No OAuth connection, verification, or platform-specific posting/streaming is enabled. Planning tracked in GitHub Issue #6; Twitch live stream integration remains for January.
+
+## October account protection: phone authenticator MFA (preview)
+
+- Optional phone authenticator **TOTP** after username/password. Two-phase server login ensures MFA is checked before a normal session token exists.
+- Setup requires password re-entry and verification of a six-digit rotating phone code; server shows eight **single-use offline recovery codes** only after successful enrollment.
+- TOTP secrets are encrypted with a **persistent operator-managed** `RETRORELAY_MFA_KEY` outside the database. Unconfigured MFA setup fails with a clear error; already-enrolled users are **not** allowed to bypass phone verification when the key is missing.
+- Per-account password/code attempt throttling and OTP replay prevention are included; these do not replace a production security audit.
+- No SMS provider, phone-number registration, or optional app PIN in this preview; PIN + password is not MFA. The security checklist in GitHub Issue #9 must pass before October release.
