@@ -138,3 +138,9 @@ python -m pytest -q
 - [GoTo Hamachi support](https://support.goto.com/hamachi) — virtual private networking.
 
 **Legal:** use your own authorized game backups, homebrew and emulator/BIOS files. This project does not offer ROM downloads or bypass game DRM or paid network services.
+
+## Artwork and controller-only guest play (October preview)
+
+Lobby hosts may upload **original or licensed** PNG/JPEG/WebP art (<800 KB) and confirm that they are permitted to publish it. Other signed-in users see a thumbnail while browsing and in the waiting room. Game titles support Unicode across platforms and languages; unillustrated games show text fallback. The app does not include an unlicensed worldwide cover-art library. See `ARTWORK_AND_PLAY_MODES.md`.
+
+For host-only-streamed games, select **Parsec shared-controller remote play**. The host needs the game and Parsec configured; joining guests do not need their own ROM or the emulator. They do still register their input devices and connect via Parsec (a separate service), with the host approving access. For native netplay, each player still needs a matching game copy/version. **RetroRelay does not host or distribute ROMs or commercial game artwork.**

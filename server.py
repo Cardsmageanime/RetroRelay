@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import base64
 import hmac
 import os
 import re
@@ -13,10 +14,12 @@ from pathlib import Path
 from contextlib import contextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
 
 from catalog import PLATFORMS, MODES, compatible_mode
 from controllers import controller_family
+from artwork import clean_artwork
 
 USERNAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{2,23}$")
 HEX_RE = re.compile(r"^[a-f0-9]{64}$")
@@ -51,12 +54,18 @@ class RoomCreate(BaseModel):
 
 
 class JoinRoom(BaseModel):
-    emulator: str
-    emulator_version: str
+    emulator: str = ""
+    emulator_version: str = ""
     core_name: str = ""
     core_version: str = ""
-    game_sha256: str
+    game_sha256: str = ""
     controller_id: str | None = None
+
+
+class ArtworkUpload(BaseModel):
+    image_base64: str = Field(min_length=1, max_length=1_100_000)
+    rights_confirmed: bool = False
+
 
 
 class DeviceRegistration(BaseModel):
@@ -141,6 +150,11 @@ def init_db(path: str):
             message TEXT NOT NULL, created_at INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_messages_room ON messages(room_id,id);
+        CREATE TABLE IF NOT EXISTS room_artwork (
+            room_id TEXT PRIMARY KEY REFERENCES rooms(id) ON DELETE CASCADE,
+            image_png BLOB NOT NULL,
+            uploaded_at INTEGER NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS devices (
             id TEXT PRIMARY KEY,
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -221,6 +235,9 @@ def create_app(db_path: str | None = None) -> FastAPI:
             "notes": room["notes"], "max_players": room["max_players"],
             "players": count, "created_at": room["created_at"],
             "controller_required": bool(room["controller_required"]),
+            "artwork": bool(db.execute("SELECT 1 FROM room_artwork WHERE room_id=?", (room["id"],)).fetchone()),
+            "game_copy_required": room["mode"] != "parsec",
+
         }
 
     @app.get("/health")
@@ -343,12 +360,46 @@ def create_app(db_path: str | None = None) -> FastAPI:
             db.commit()
         return {"id": room_id}
 
+    @app.put("/rooms/{room_id}/artwork")
+    def put_room_artwork(room_id: str, body: ArtworkUpload, request: Request,
+                         me=Depends(current_user)):
+        if not body.rights_confirmed:
+            raise HTTPException(400, "Confirm you own the art or have permission to publish it")
+        try:
+            safe_png = clean_artwork(body.image_base64)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        with conn(request) as db:
+            room = require_room(db, room_id)
+            if room["host_id"] != me["id"]:
+                raise HTTPException(403, "Only the host may upload room artwork")
+            db.execute("""INSERT INTO room_artwork(room_id,image_png,uploaded_at)
+                VALUES(?,?,?) ON CONFLICT(room_id) DO UPDATE SET
+                image_png=excluded.image_png,uploaded_at=excluded.uploaded_at""",
+                (room_id, safe_png, now()))
+        return {"ok": True, "bytes": len(safe_png)}
+
+    @app.get("/rooms/{room_id}/artwork")
+    def get_room_artwork(room_id: str, request: Request,
+                         me=Depends(current_user)):
+        with conn(request) as db:
+            require_room(db, room_id)
+            img = db.execute("SELECT image_png FROM room_artwork WHERE room_id=?",
+                             (room_id,)).fetchone()
+            if not img:
+                raise HTTPException(404, "This lobby has no custom artwork")
+        return Response(content=img["image_png"], media_type="image/png",
+                        headers={"Cache-Control": "private, max-age=120", "X-Content-Type-Options": "nosniff"})
+
     @app.post("/rooms/{room_id}/join")
     def join_room(room_id: str, body: JoinRoom, request: Request, me=Depends(current_user)):
         with conn(request) as db:
             db.execute("BEGIN IMMEDIATE")
             room = require_room(db, room_id)
-            require_values = ("emulator", "emulator_version", "core_name", "core_version", "game_sha256")
+            # Remote-play guests view the host's authorized local game through Parsec.
+            # They do not need an emulator or game file; other modes match exact bytes.
+            require_values = () if room["mode"] == "parsec" else (
+                "emulator", "emulator_version", "core_name", "core_version", "game_sha256")
             mismatches = [key for key in require_values if getattr(body, key).strip() != room[key]]
             if mismatches:
                 raise HTTPException(409, "Cannot join: mismatched " + ", ".join(mismatches))

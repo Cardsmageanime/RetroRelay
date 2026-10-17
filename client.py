@@ -6,6 +6,7 @@ or magically add a network stack to an emulator.
 from __future__ import annotations
 
 import hashlib
+import base64
 import ipaddress
 import json
 import os
@@ -164,6 +165,18 @@ class API:
             raise APIError("Cannot reach the lobby server. Check Wi-Fi/Internet and server URL. " + str(err)) from err
 
 
+    def image_bytes(self, room_id: str) -> bytes:
+        if not re.fullmatch(r"[A-Fa-f0-9]{8}", room_id):
+            raise APIError("Invalid room ID")
+        req = urllib.request.Request(self.base + "/rooms/" + room_id + "/artwork")
+        req.add_header("Authorization", "Bearer " + (self.token or ""))
+        with urllib.request.urlopen(req, timeout=12) as response:
+            data = response.read(410_000)
+        if len(data) > 400_000 or not data.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise APIError("Artwork is not a valid-sized PNG thumbnail")
+        return data
+
+
 class RetroRelayApp(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -176,6 +189,8 @@ class RetroRelayApp(tk.Tk):
         self.username = None
         self.current_room = None
         self.rooms = {}
+        self.cover_cache = {}
+        self.cover_photo = None
         self.detected_devices = []
         self.registered_devices = []
         self.controller_labels = {}
@@ -384,6 +399,8 @@ class RetroRelayApp(tk.Tk):
         self.h_hint = tk.StringVar()
         self.h_notes = tk.StringVar()
         self.h_max = tk.IntVar(value=2)
+        self.h_cover_file = tk.StringVar()
+        self.h_cover_rights = tk.BooleanVar(value=False)
         self.label(form, "Game name", 2)
         self.entry(form, self.h_title, 2)
         self.label(form, "My matching game file / folder", 3)
@@ -401,7 +418,12 @@ class RetroRelayApp(tk.Tk):
         self.entry(form, self.h_notes, 6)
         self.label(form, "Maximum players", 7)
         ttk.Spinbox(form, from_=2, to=16, textvariable=self.h_max, width=6).grid(row=7,column=1,sticky="w",padx=7,pady=7)
-        ttk.Button(t, text="Create room + check my game", style="Accent.TButton", command=self.host_game).pack(anchor="w", pady=(20, 10))
+        self.label(form, "Optional lobby cover art", 8)
+        self.entry(form, self.h_cover_file, 8)
+        ttk.Button(form, text="Image", command=lambda: self.pick_art_file()).grid(row=8, column=2, padx=4)
+        ttk.Checkbutton(t, text="I made this artwork or have permission to publish it publicly",
+                        variable=self.h_cover_rights).pack(anchor="w", pady=(8, 0))
+        ttk.Button(t, text="Create room + check my game", style="Accent.TButton", command=self.host_game).pack(anchor="w", pady=(10, 10))
         self.host_note = tk.StringVar(value="For RetroArch, give friends your reachable IP or VPN IP (e.g. 10.0.0.5:55435).")
         ttk.Label(t, textvariable=self.host_note, style="Small.TLabel", wraplength=850).pack(anchor="w")
         self.h_mode.trace_add("write", lambda *_: self.host_note.set(MODES.get(self.h_mode.get(), "")))
@@ -420,19 +442,26 @@ class RetroRelayApp(tk.Tk):
             self.lobby_tree.column(col, width=width, minwidth=70)
         self.lobby_tree.pack(fill="both", expand=True, pady=(0, 9))
         self.lobby_tree.bind("<<TreeviewSelect>>", self.choose_lobby)
+        details = ttk.Frame(t)
+        details.pack(fill="x", pady=7)
+        self.cover_widget = ttk.Label(details, text="Select a lobby to preview its artwork",
+                                      width=36, anchor="center", background=PANEL)
+        self.cover_widget.pack(side="left", padx=(0, 15))
         self.lobby_desc = tk.StringVar(value="Select a lobby to read the requirements.")
-        ttk.Label(t, textvariable=self.lobby_desc, style="Small.TLabel", wraplength=1000).pack(anchor="w", pady=7)
+        ttk.Label(details, textvariable=self.lobby_desc, style="Small.TLabel",
+                  wraplength=730, justify="left").pack(side="left", fill="x", expand=True)
+
         join_form = ttk.Frame(t)
         join_form.pack(fill="x", pady=7)
         join_form.columnconfigure(1, weight=1)
         self.join_path = tk.StringVar()
-        self.label(join_form, "Your game file / folder", 0)
+        self.label(join_form, "Your game file / folder (not needed for Parsec)", 0)
         self.entry(join_form, self.join_path, 0)
         ttk.Button(join_form, text="File", command=lambda: self.pick_file(self.join_path)).grid(row=0,column=2,padx=4)
         ttk.Button(join_form, text="Folder", command=lambda: self.pick_folder(self.join_path)).grid(row=0,column=3,padx=4)
         row = ttk.Frame(t)
         row.pack(anchor="w")
-        ttk.Button(row, text="Verify game + join", style="Accent.TButton", command=self.join_game).pack(side="left", padx=(0, 10))
+        ttk.Button(row, text="Join selected lobby", style="Accent.TButton", command=self.join_game).pack(side="left", padx=(0, 10))
         ttk.Button(row, text="Set up selected emulator", command=self.setup_selected).pack(side="left")
 
     def build_room(self):
@@ -440,6 +469,9 @@ class RetroRelayApp(tk.Tk):
         self.section(t, "Your waiting room")
         self.room_heading = tk.StringVar(value="No active room. Host a game or join an existing lobby.")
         ttk.Label(t, textvariable=self.room_heading, wraplength=950).pack(anchor="w", pady=5)
+        self.room_cover_label = ttk.Label(t, text="No custom artwork selected", width=36,
+                                         anchor="center", background=PANEL)
+        self.room_cover_label.pack(anchor="w", pady=5)
         self.members_heading = tk.StringVar(value="Players: —")
         ttk.Label(t, textvariable=self.members_heading).pack(anchor="w", pady=5)
         self.connect_heading = tk.StringVar(value="Connection: —")
@@ -448,6 +480,7 @@ class RetroRelayApp(tk.Tk):
         tools.pack(anchor="w", pady=(10, 5))
         ttk.Button(tools, text="I'm ready / not ready", command=self.toggle_ready).pack(side="left", padx=(0, 8))
         ttk.Button(tools, text="Launch emulator / play", style="Accent.TButton", command=self.start_play).pack(side="left", padx=(0, 8))
+        ttk.Button(tools, text="Host: change artwork", command=self.update_room_art).pack(side="left", padx=(0, 8))
         ttk.Button(tools, text="Copy room ID", command=self.copy_room_id).pack(side="left", padx=(0, 8))
         ttk.Button(tools, text="Leave / close room", command=self.leave_game).pack(side="left")
         hint = ttk.Frame(t)
@@ -679,6 +712,12 @@ class RetroRelayApp(tk.Tk):
             raise ValueError("First configure " + emulator + " for " + platform + " under Emulator Setup")
         return profile
 
+    def pick_art_file(self):
+        path = filedialog.askopenfilename(title="Choose artwork you may publish",
+                                          filetypes=[("Images", "*.png *.jpg *.jpeg *.webp")])
+        if path:
+            self.h_cover_file.set(path)
+
     def host_game(self):
         if not self.api.token:
             return self.report_error("Log in first")
@@ -709,9 +748,14 @@ class RetroRelayApp(tk.Tk):
             return self.report_error("Maximum players must be from 2 to 16")
 
         hint, notes = self.h_hint.get(), self.h_notes.get()
+        cover_path = self.h_cover_file.get().strip()
+        if cover_path and not self.h_cover_rights.get():
+            return self.report_error("Confirm you have permission to publish the selected artwork")
+        if cover_path and (not Path(cover_path).is_file() or Path(cover_path).stat().st_size > 800_000):
+            return self.report_error("Choose an image under 800 KB before creating a room")
         def operation():
             hashcode = game_fingerprint(path)
-            return self.api.call("POST", "/rooms", {
+            room = self.api.call("POST", "/rooms", {
                 "platform": platform, "emulator": emulator, "emulator_version": profile["version"],
                 "core_name": profile.get("core_name", ""), "core_version": profile.get("core_version", ""),
                 "game_title": title, "game_sha256": hashcode,
@@ -719,6 +763,15 @@ class RetroRelayApp(tk.Tk):
                 "notes": notes, "max_players": max_players,
                 "controller_required": True, "controller_id": controller_id,
             })
+            if cover_path:
+                try:
+                    self.api.call("PUT", "/rooms/" + room["id"] + "/artwork", {
+                        "image_base64": base64.b64encode(Path(cover_path).read_bytes()).decode("ascii"),
+                        "rights_confirmed": True,
+                    })
+                except (APIError, OSError, ValueError) as exc:
+                    room["art_warning"] = str(exc)
+            return room
         def done(result):
             self.current_room = {"id": result["id"], "is_host": True, "platform": platform,
                                  "emulator": emulator, "mode": mode, "connection_hint": hint}
@@ -727,7 +780,9 @@ class RetroRelayApp(tk.Tk):
             self.clear_chat()
             self.notebook.select(self.room_tab)
             self.refresh_room()
-            self.status_var.set("Room " + result["id"] + " created • waiting for friends")
+            self.status_var.set("Room " + result["id"] + " created • " +
+                                ("Cover upload failed: " + result['art_warning']
+                                 if result.get('art_warning') else "waiting for friends"))
         self.bg(operation, done, "Hashing every byte of your game, then creating lobby...")
 
     def refresh_lobbies(self, quiet=False):
@@ -748,6 +803,10 @@ class RetroRelayApp(tk.Tk):
                     r["mode"], str(r["players"]) + "/" + str(r["max_players"])))
             if selected and selected in self.rooms:
                 self.lobby_tree.selection_set(selected)
+                self.choose_lobby()
+            else:
+                self.cover_widget.configure(image="", text="Select a lobby to preview its artwork")
+                self.cover_photo = None
             if not quiet:
                 self.status_var.set(str(len(rows)) + " live lobby/lobbies found")
         def work():
@@ -780,7 +839,61 @@ class RetroRelayApp(tk.Tk):
                 + (f"  |  Core: {room['core_name']} {room['core_version']}" if room["core_name"] else "")
                 + f"\nMode: {MODES.get(room['mode'], room['mode'])}  •  {room['notes']}"
                 + ("\nThis room requires a registered input profile." if room.get("controller_required") else "")
+                + ("\nGuests only need Parsec and a controller; no local game copy required."
+                   if room["mode"] == "parsec" else "\nGuests must supply their own matching game copy.")
             )
+            self.preview_art(room_id, room.get("artwork", False))
+
+    def preview_art(self, room_id, has_artwork):
+        if not has_artwork:
+            self.cover_widget.configure(image="", text="No cover uploaded\n" +
+                                        self.rooms[room_id]["platform"])
+            self.cover_photo = None
+            return
+        if room_id in self.cover_cache:
+            self.apply_cover(room_id, self.cover_cache[room_id])
+            return
+        self.cover_widget.configure(image="", text="Loading game artwork...")
+        self.cover_photo = None
+        def fetch():
+            try:
+                data = self.api.image_bytes(room_id)
+                self.cover_cache[room_id] = data
+                self.after(0, lambda: self.apply_cover(room_id, data))
+            except Exception:
+                self.after(0, lambda: self.cover_widget.configure(text="Artwork unavailable"))
+        threading.Thread(target=fetch, daemon=True).start()
+
+    def apply_cover(self, room_id, data):
+        if self.selected_lobby_id() != room_id:
+            return
+        try:
+            self.cover_photo = tk.PhotoImage(data=base64.b64encode(data).decode("ascii"))
+            self.cover_widget.configure(image=self.cover_photo, text="")
+        except tk.TclError:
+            self.cover_widget.configure(image="", text="Artwork unavailable")
+
+    def preview_room_cover(self, room_id):
+        if room_id in self.cover_cache:
+            self.apply_room_cover(room_id, self.cover_cache[room_id])
+            return
+        def fetch():
+            try:
+                data = self.api.image_bytes(room_id)
+                self.cover_cache[room_id] = data
+                self.after(0, lambda: self.apply_room_cover(room_id, data))
+            except Exception:
+                self.after(0, lambda: self.room_cover_label.configure(text="Artwork unavailable"))
+        threading.Thread(target=fetch, daemon=True).start()
+
+    def apply_room_cover(self, room_id, data):
+        if not self.current_room or self.current_room['id'] != room_id:
+            return
+        try:
+            self.room_cover_photo = tk.PhotoImage(data=base64.b64encode(data).decode('ascii'))
+            self.room_cover_label.configure(image=self.room_cover_photo, text="")
+        except tk.TclError:
+            self.room_cover_label.configure(image="", text="Artwork unavailable")
 
     def setup_selected(self):
         room_id = self.selected_lobby_id()
@@ -804,22 +917,31 @@ class RetroRelayApp(tk.Tk):
         if not room_id or room_id not in self.rooms:
             return self.report_error("Select a room first")
         room = self.rooms[room_id]
-        try:
-            profile = self.selected_profile(room["platform"], room["emulator"])
-        except ValueError as exc:
-            return self.report_error(str(exc))
-        for field, key in [("version", "emulator_version"), ("core_name", "core_name"),
-                           ("core_version", "core_version")]:
-            if profile.get(field, "") != room[key]:
-                return self.report_error(f"Emulator profile mismatch ({field}). Host requires {room[key]!r}.")
-        path = self.join_path.get().strip()
-        if Path(path).suffix.lower() in (".cue", ".m3u"):
-            return self.report_error("Select the containing FOLDER for CUE/BIN or multi-disc games")
+        controller_id = self.selected_controller_id()
+        if room.get("controller_required") and not controller_id:
+            self.notebook.select(self.controller_tab)
+            return self.report_error("Register and select an input device before joining")
+        is_remote_guest = room["mode"] == "parsec"
+        profile = {}
+        path = ""
+        if not is_remote_guest:
+            try:
+                profile = self.selected_profile(room["platform"], room["emulator"])
+            except ValueError as exc:
+                return self.report_error(str(exc))
+            for field, key in [("version", "emulator_version"), ("core_name", "core_name"),
+                               ("core_version", "core_version")]:
+                if profile.get(field, "") != room[key]:
+                    return self.report_error(f"Emulator profile mismatch ({field}). Host requires {room[key]!r}.")
+            path = self.join_path.get().strip()
+            if Path(path).suffix.lower() in (".cue", ".m3u"):
+                return self.report_error("Select the containing FOLDER for CUE/BIN or multi-disc games")
 
         def operation():
-            digest = game_fingerprint(path)
+            digest = "" if is_remote_guest else game_fingerprint(path)
             self.api.call("POST", "/rooms/" + room_id + "/join", {
-                "emulator": room["emulator"], "emulator_version": profile["version"],
+                "emulator": "" if is_remote_guest else room["emulator"],
+                "emulator_version": "" if is_remote_guest else profile["version"],
                 "core_name": profile.get("core_name", ""), "core_version": profile.get("core_version", ""),
                 "game_sha256": digest,
                 "controller_id": controller_id,
@@ -832,8 +954,10 @@ class RetroRelayApp(tk.Tk):
             self.clear_chat()
             self.notebook.select(self.room_tab)
             self.refresh_room()
-            self.status_var.set("Joined room " + result + " • game hash and versions matched")
-        self.bg(operation, done, "Verifying full game SHA-256 and joining...")
+            self.status_var.set("Joined " + result + (" • connect using Parsec to play"
+                if is_remote_guest else " • game hash and versions matched"))
+        self.bg(operation, done, "Joining controller-only room..." if is_remote_guest
+                else "Verifying full game SHA-256 and joining...")
 
     def clear_chat(self):
         self.chat_view.configure(state="normal")
@@ -866,6 +990,10 @@ class RetroRelayApp(tk.Tk):
         room, messages = result
         self.current_room = room
         self.room_heading.set(f"{room['game_title']}  •  {room['platform']}  •  {room['emulator']} {room['emulator_version']}  •  Room {room_id}")
+        if room.get("artwork"):
+            self.preview_room_cover(room_id)
+        else:
+            self.room_cover_label.configure(image="", text=f"{room['platform']} • {room['game_title'][:35]}")
         self.members_heading.set("Players: " + "    |    ".join(
             m["username"] + (" ✓ READY" if m["ready"] else " • waiting") +
             (" [" + m["controller"][:28] + "]" if m.get("controller") else "")
@@ -909,6 +1037,29 @@ class RetroRelayApp(tk.Tk):
             return
         self.chat_entry.set("")
         self.post_room("/chat", {"message": message}, "Message sent")
+
+    def update_room_art(self):
+        if not self.current_room or not self.current_room.get('is_host'):
+            return self.report_error("Only the host can change lobby artwork")
+        if not messagebox.askyesno("Artwork rights", "Do you own this image or have explicit permission to publish it publicly?"):
+            return
+        path = filedialog.askopenfilename(title="Select artwork you may publish",
+                                           filetypes=[("Artwork", "*.png *.jpg *.jpeg *.webp")])
+        if not path:
+            return
+        if Path(path).stat().st_size > 800_000:
+            return self.report_error("Artwork must be under 800 KB")
+        room_id = self.current_room['id']
+        def operation():
+            encoded = base64.b64encode(Path(path).read_bytes()).decode('ascii')
+            self.api.call('PUT', f'/rooms/{room_id}/artwork',
+                          {'image_base64': encoded, 'rights_confirmed': True})
+            return True
+        def done(_):
+            self.cover_cache.pop(room_id, None)
+            self.refresh_room()
+            self.status_var.set("Lobby artwork updated")
+        self.bg(operation, done, "Uploading artwork...")
 
     def update_connection(self):
         if not self.current_room:
