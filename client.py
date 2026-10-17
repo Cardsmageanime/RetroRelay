@@ -21,7 +21,7 @@ import urllib.request
 import webbrowser
 from urllib.parse import urlsplit
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from catalog import MODES, PLATFORMS, compatible_mode
 from controllers import detect_input_devices
@@ -291,6 +291,14 @@ class RetroRelayApp(tk.Tk):
         ttk.Button(buttons, text="Create account", command=self.register).pack(side="left", padx=(0, 10))
         ttk.Button(buttons, text="Test server", command=self.test_connection).pack(side="left", padx=(0, 10))
         ttk.Button(buttons, text="Log out", command=self.logout).pack(side="left")
+        security_row = ttk.Frame(t)
+        security_row.pack(anchor="w", pady=(0, 8))
+        ttk.Button(security_row, text="Enable phone 2-step", command=self.enable_mfa).pack(
+            side="left", padx=(0, 9))
+        ttk.Button(security_row, text="Disable 2-step", command=self.disable_mfa).pack(side="left")
+        self.mfa_status_var = tk.StringVar(value="Phone two-step authentication: log in to check status")
+        ttk.Label(t, textvariable=self.mfa_status_var, style="Small.TLabel").pack(
+            anchor="w", pady=(0, 9))
         ttk.Label(t, text="First test: run the hub server on your own PC and keep http://127.0.0.1:8751.\n"
                   "For friends over the Internet, deploy the hub with HTTPS and use its public URL.\n"
                   "Every player uses the same lobby server URL.", style="Small.TLabel", justify="left").pack(anchor="w", pady=10)
@@ -631,23 +639,115 @@ class RetroRelayApp(tk.Tk):
             self.current_room = None
         return self.api
 
+    def finish_login(self, api, res):
+        api.token = res["token"]
+        self.username = res["username"]
+        self.login_pass.set("")
+        self.status_var.set("Online • logged in as " + self.username)
+        self.notebook.select(self.discover_tab)
+        self.refresh_lobbies()
+        self.scan_controllers()
+        self.load_registered_controllers()
+        self.load_social_links()
+        self.refresh_mfa_status()
+
     def login(self):
         try:
             api = self.rebase_api()
         except ValueError as exc:
             return self.report_error(str(exc))
         def done(res):
-            api.token = res["token"]
-            self.username = res["username"]
-            self.status_var.set("Online • logged in as " + self.username)
-            self.notebook.select(self.discover_tab)
-            self.refresh_lobbies()
-            self.scan_controllers()
-            self.load_registered_controllers()
-            self.load_social_links()
+            if res.get("mfa_required"):
+                code = simpledialog.askstring(
+                    "RetroRelay two-step verification",
+                    "Enter your six-digit phone authenticator code or one saved recovery code:",
+                    parent=self, show="*")
+                if not code:
+                    self.status_var.set("Two-step verification cancelled; not logged in")
+                    return
+                self.bg(lambda: api.call("POST", "/mfa/login",
+                                        {"challenge": res["challenge"], "code": code.strip()}),
+                        lambda verified: self.finish_login(api, verified),
+                        "Verifying phone authenticator...")
+            else:
+                self.finish_login(api, res)
         username, password = self.login_user.get(), self.login_pass.get()
         self.bg(lambda: api.call("POST", "/login", {"username": username,
                    "password": password}), done, "Signing in...")
+
+    def refresh_mfa_status(self):
+        if self.api.token:
+            def done(res):
+                if res["enabled"]:
+                    self.mfa_status_var.set("Phone two-step verification is ENABLED")
+                elif res.get("server_configured"):
+                    self.mfa_status_var.set("Phone two-step verification is available but OFF")
+                else:
+                    self.mfa_status_var.set("Phone two-step not configured on server; contact its operator")
+            self.bg(lambda: self.api.call("GET", "/mfa/status"), done,
+                    "Checking account two-step status...")
+
+    def enable_mfa(self):
+        if not self.api.token:
+            return self.report_error("Log in before enabling phone two-step verification")
+        password = simpledialog.askstring("Enable phone two-step",
+                                           "Re-enter your RetroRelay account password:",
+                                           show="*", parent=self)
+        if not password:
+            return
+        def show_setup(res):
+            messagebox.showinfo(
+                "Add RetroRelay to your authenticator",
+                "In your phone authenticator app, add an account using this setup key:\\n\\n"
+                + res["secret"]
+                + "\\n\\nKeep this key private. The setup expires after 15 minutes.\\n"
+                "Do not share it or place it in a screenshot.",
+                parent=self)
+            code = simpledialog.askstring(
+                "Confirm authenticator",
+                "Enter the current SIX-digit code from your authenticator to enable protection:",
+                parent=self, show="*")
+            if not code:
+                self.status_var.set("Setup not confirmed; two-step is still disabled")
+                return
+            def enrolled(result):
+                messagebox.showwarning(
+                    "Save your recovery codes NOW",
+                    "These eight one-use recovery codes will never be shown again.\\n"
+                    "Save them offline before closing this window.\\n\\n"
+                    + "\\n".join(result["recovery_codes"]),
+                    parent=self)
+                self.refresh_mfa_status()
+            self.bg(lambda: self.api.call("POST", "/mfa/confirm",
+                                           {"code": code.strip()}),
+                    enrolled, "Confirming phone two-step...")
+        self.bg(lambda: self.api.call("POST", "/mfa/setup",
+                                      {"password": password}), show_setup,
+                "Starting secure two-step setup...")
+
+    def disable_mfa(self):
+        if not self.api.token:
+            return self.report_error("Log in before changing two-step settings")
+        password = simpledialog.askstring("Disable phone two-step",
+                                           "Confirm your account password:",
+                                           parent=self, show="*")
+        if not password:
+            return
+        code = simpledialog.askstring(
+            "Disable phone two-step", "Enter a fresh phone code or single-use recovery code:",
+            parent=self, show="*")
+        if not code:
+            return
+        if not messagebox.askyesno("Disable phone two-step",
+                                   "Disable the extra login protection for this account?",
+                                   parent=self):
+            return
+        self.bg(lambda: self.api.call("POST", "/mfa/disable",
+                                      {"password": password, "code": code.strip()}),
+                lambda _: (self.refresh_mfa_status(),
+                           messagebox.showinfo("Two-step disabled", "Phone verification is now off.",
+                                               parent=self)),
+                "Updating account security...")
 
     def register(self):
         try:
@@ -680,6 +780,7 @@ class RetroRelayApp(tk.Tk):
         self.username = None
         self.current_room = None
         self.registered_devices = []
+        self.mfa_status_var.set("Phone two-step authentication: log in to check status")
         for item in self.social_tree.get_children():
             self.social_tree.delete(item)
         self.controller_labels = {}
