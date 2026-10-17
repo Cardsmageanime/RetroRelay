@@ -1,0 +1,2 @@
+# Optional SDL2-based gamepad discovery for the desktop application.
+pygame>=2.6,<3

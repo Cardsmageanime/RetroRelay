@@ -3,6 +3,8 @@ name: Test and publish initial source-code preview
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -22,7 +24,7 @@ jobs:
   first-preview-release:
     needs: tests
     runs-on: ubuntu-latest
-    if: github.repository == 'Cardsmageanime/RetroRelay'
+    if: github.repository == 'Cardsmageanime/RetroRelay' && github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@v4
       - name: Create initial source-only pre-release if it does not exist

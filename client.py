@@ -23,6 +23,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from catalog import MODES, PLATFORMS, compatible_mode
+from controllers import detect_input_devices
 
 CONFIG_DIR = Path.home() / ".retrorelay_client"
 CONFIG_FILE = CONFIG_DIR / "settings.json"
@@ -175,6 +176,9 @@ class RetroRelayApp(tk.Tk):
         self.username = None
         self.current_room = None
         self.rooms = {}
+        self.detected_devices = []
+        self.registered_devices = []
+        self.controller_labels = {}
         self.last_msg_id = 0
         self.current_ready = False
         self.room_polling = False
@@ -227,17 +231,19 @@ class RetroRelayApp(tk.Tk):
         self.notebook.pack(fill="both", expand=True, padx=20, pady=10)
         self.account_tab = ttk.Frame(self.notebook, padding=18)
         self.setup_tab = ttk.Frame(self.notebook, padding=18)
+        self.controller_tab = ttk.Frame(self.notebook, padding=18)
         self.host_tab = ttk.Frame(self.notebook, padding=18)
         self.discover_tab = ttk.Frame(self.notebook, padding=18)
         self.room_tab = ttk.Frame(self.notebook, padding=18)
         for name, tab in [
             ("1 • Account", self.account_tab), ("2 • Emulator Setup", self.setup_tab),
-            ("3 • Host Game", self.host_tab), ("4 • Find Games", self.discover_tab),
-            ("5 • Waiting Room", self.room_tab),
+            ("3 • Controllers", self.controller_tab), ("4 • Host Game", self.host_tab),
+            ("5 • Find Games", self.discover_tab), ("6 • Waiting Room", self.room_tab),
         ]:
             self.notebook.add(tab, text=name)
         self.build_account()
         self.build_setup()
+        self.build_controllers()
         self.build_host()
         self.build_discover()
         self.build_room()
@@ -327,6 +333,41 @@ class RetroRelayApp(tk.Tk):
                   "RetroArch netplay also requires the EXACT same core (name, build and settings).\n"
                   "No ROMs, BIOS files or paid games are included in the project.", style="Small.TLabel", justify="left").pack(anchor="w", pady=15)
         self.load_profile()
+
+    def build_controllers(self):
+        t = self.controller_tab
+        self.section(t, "Detect and register your input devices")
+        ttk.Label(t, text="Connect a gamepad via USB/Bluetooth, then choose Scan. Standard keyboard and mouse\n"
+                  "can also be registered. Your device must be registered before joining new controller-required rooms.",
+                  style="Small.TLabel", justify="left").pack(anchor="w", pady=(0, 12))
+        detected_controls = ttk.Frame(t)
+        detected_controls.pack(fill="x", pady=5)
+        ttk.Button(detected_controls, text="Scan connected devices", command=self.scan_controllers).pack(side="left", padx=(0, 10))
+        ttk.Button(detected_controls, text="Register selected", style="Accent.TButton",
+                   command=self.register_controller).pack(side="left")
+        self.detected_tree = ttk.Treeview(t, columns=("kind", "name", "family"), show="headings", height=5)
+        for key, title, width in (("kind", "Input", 110), ("name", "Operating-system device name", 480),
+                                  ("family", "Detected family (unverified)", 240)):
+            self.detected_tree.heading(key, text=title)
+            self.detected_tree.column(key, width=width)
+        self.detected_tree.pack(fill="x", pady=(4, 15))
+        ttk.Label(t, text="Registered to your account", style="Header.TLabel").pack(anchor="w", pady=(0, 7))
+        ttk.Button(t, text="Refresh registered list", command=self.load_registered_controllers).pack(anchor="w", pady=5)
+        self.registered_tree = ttk.Treeview(t, columns=("kind", "name", "family"), show="headings", height=5)
+        for key, title, width in (("kind", "Input", 110), ("name", "Registered name", 480),
+                                  ("family", "Type (not authenticated)", 240)):
+            self.registered_tree.heading(key, text=title)
+            self.registered_tree.column(key, width=width)
+        self.registered_tree.pack(fill="x", pady=5)
+        ttk.Button(t, text="Remove selected registration", command=self.remove_controller).pack(anchor="w", pady=8)
+        ttk.Label(t, text="Use this input for game rooms:", style="Small.TLabel").pack(anchor="w", pady=(8, 3))
+        self.selected_controller_label = tk.StringVar()
+        self.registered_combo = ttk.Combobox(t, textvariable=self.selected_controller_label,
+                                            state="readonly", width=68)
+        self.registered_combo.pack(anchor="w")
+        ttk.Label(t, text="Important: device names and SDL GUIDs can be faked. Registration records your chosen\n"
+                  "input, but cannot verify official hardware, block macros, or police inputs inside emulators.",
+                  style="Small.TLabel", justify="left").pack(anchor="w", pady=(12, 0))
 
     def build_host(self):
         t = self.host_tab
@@ -488,6 +529,8 @@ class RetroRelayApp(tk.Tk):
             self.status_var.set("Online • logged in as " + self.username)
             self.notebook.select(self.discover_tab)
             self.refresh_lobbies()
+            self.scan_controllers()
+            self.load_registered_controllers()
         username, password = self.login_user.get(), self.login_pass.get()
         self.bg(lambda: api.call("POST", "/login", {"username": username,
                    "password": password}), done, "Signing in...")
@@ -522,8 +565,69 @@ class RetroRelayApp(tk.Tk):
         self.api.token = None
         self.username = None
         self.current_room = None
+        self.registered_devices = []
+        self.controller_labels = {}
+        self.registered_combo["values"] = []
+        self.selected_controller_label.set("")
         self.status_var.set("Offline • log in to connect to the lobby server")
         self.notebook.select(self.account_tab)
+
+    def scan_controllers(self):
+        def done(devices):
+            self.detected_devices = devices
+            for item in self.detected_tree.get_children():
+                self.detected_tree.delete(item)
+            for i, device in enumerate(devices):
+                self.detected_tree.insert("", "end", iid=str(i),
+                                          values=(device["kind"], device["name"], device["family"]))
+            self.status_var.set(f"Found {len(devices)} input options (including keyboard/mouse)")
+        self.bg(detect_input_devices, done, "Scanning local input devices...")
+
+    def load_registered_controllers(self):
+        if not self.api.token:
+            return self.report_error("Log in to see account registrations")
+        def done(devices):
+            previous_id = self.selected_controller_id()
+            self.registered_devices = devices
+            self.controller_labels = {}
+            for item in self.registered_tree.get_children():
+                self.registered_tree.delete(item)
+            for device in devices:
+                self.registered_tree.insert("", "end", iid=device["id"],
+                    values=(device["kind"], device["name"], device["family"]))
+                label = f'{device["kind"]}: {device["name"]} [{device["id"][:8]}]'
+                self.controller_labels[label] = device["id"]
+            self.registered_combo["values"] = list(self.controller_labels)
+            selected_label = next((label for label, did in self.controller_labels.items()
+                                   if did == previous_id), None)
+            self.selected_controller_label.set(selected_label or next(iter(self.controller_labels), ""))
+        self.bg(lambda: self.api.call("GET", "/devices"), done, "Fetching registered devices...")
+
+    def selected_controller_id(self):
+        return self.controller_labels.get(self.selected_controller_label.get())
+
+    def register_controller(self):
+        if not self.api.token:
+            return self.report_error("Log in before registering controllers")
+        items = self.detected_tree.selection()
+        if not items:
+            return self.report_error("Scan and select a device first")
+        device = self.detected_devices[int(items[0])]
+        self.bg(lambda: self.api.call("POST", "/devices",
+                {"kind": device["kind"], "name": device["name"], "guid": device["guid"]}),
+                lambda _: self.load_registered_controllers(), "Registering your input choice...")
+
+    def remove_controller(self):
+        if not self.api.token:
+            return self.report_error("Log in first")
+        selection = self.registered_tree.selection()
+        if not selection:
+            return self.report_error("Select a registered device to remove")
+        if not messagebox.askyesno("Remove controller", "Remove this controller registration?"):
+            return
+        did = selection[0]
+        self.bg(lambda: self.api.call("DELETE", "/devices/" + did),
+                lambda _: self.load_registered_controllers(), "Removing device registration...")
 
     def load_profile(self):
         p = self.settings.get("profiles", {}).get(profile_key(self.sp_platform.get(), self.sp_emu.get()), {})
@@ -580,6 +684,10 @@ class RetroRelayApp(tk.Tk):
             return self.report_error("Log in first")
         if self.current_room:
             return self.report_error("Leave your current room before hosting another")
+        controller_id = self.selected_controller_id()
+        if not controller_id:
+            self.notebook.select(self.controller_tab)
+            return self.report_error("Register and select a controller/keyboard/mouse in the Controllers tab")
         platform = self.h_platform.get()
         emulator = self.h_emu.get()
         mode = self.h_mode.get()
@@ -609,6 +717,7 @@ class RetroRelayApp(tk.Tk):
                 "game_title": title, "game_sha256": hashcode,
                 "mode": mode, "connection_hint": hint,
                 "notes": notes, "max_players": max_players,
+                "controller_required": True, "controller_id": controller_id,
             })
         def done(result):
             self.current_room = {"id": result["id"], "is_host": True, "platform": platform,
@@ -670,6 +779,7 @@ class RetroRelayApp(tk.Tk):
                 f"Required: {room['emulator']} {room['emulator_version']}"
                 + (f"  |  Core: {room['core_name']} {room['core_version']}" if room["core_name"] else "")
                 + f"\nMode: {MODES.get(room['mode'], room['mode'])}  •  {room['notes']}"
+                + ("\nThis room requires a registered input profile." if room.get("controller_required") else "")
             )
 
     def setup_selected(self):
@@ -677,6 +787,10 @@ class RetroRelayApp(tk.Tk):
         if not room_id or room_id not in self.rooms:
             return self.report_error("Select a room first")
         room = self.rooms[room_id]
+        controller_id = self.selected_controller_id()
+        if room.get("controller_required") and not controller_id:
+            self.notebook.select(self.controller_tab)
+            return self.report_error("Select a registered controller/keyboard/mouse before joining")
         self.sp_platform.set(room["platform"])
         self.sp_emu.set(room["emulator"])
         self.notebook.select(self.setup_tab)
@@ -708,6 +822,7 @@ class RetroRelayApp(tk.Tk):
                 "emulator": room["emulator"], "emulator_version": profile["version"],
                 "core_name": profile.get("core_name", ""), "core_version": profile.get("core_version", ""),
                 "game_sha256": digest,
+                "controller_id": controller_id,
             })
             return room_id
         def done(result):
@@ -752,7 +867,9 @@ class RetroRelayApp(tk.Tk):
         self.current_room = room
         self.room_heading.set(f"{room['game_title']}  •  {room['platform']}  •  {room['emulator']} {room['emulator_version']}  •  Room {room_id}")
         self.members_heading.set("Players: " + "    |    ".join(
-            m["username"] + (" ✓ READY" if m["ready"] else " • waiting") for m in room["members"]))
+            m["username"] + (" ✓ READY" if m["ready"] else " • waiting") +
+            (" [" + m["controller"][:28] + "]" if m.get("controller") else "")
+            for m in room["members"]))
         self.current_ready = next((m["ready"] for m in room["members"] if m["username"] == self.username), False)
         self.connect_heading.set("Method: " + MODES.get(room["mode"], room["mode"]) +
                                  "\nConnect info (room members only): " + (room["connection_hint"] or "Host has not posted details yet"))

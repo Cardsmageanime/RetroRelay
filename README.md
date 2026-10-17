@@ -1,4 +1,4 @@
-# RetroRelay — Classic Multiplayer Hub (Starter v0.1)
+# RetroRelay — Classic Multiplayer Hub (Controller Preview v0.2 candidate)
 
 > **Early preview / source code only:** this is not a standalone installer or a ready-to-run public multiplayer network. Do not expose the account server to open registration until security protections are added. See [Security](SECURITY.md) and [Release Notes](RELEASE_NOTES.md).
 
@@ -12,9 +12,10 @@
 2. Double-click **`START_HUB_WINDOWS.bat`** on the PC that will host the *lobby server*. It installs dependencies in a local virtual environment automatically. Keep the terminal running.
 3. Double-click **`START_APP_WINDOWS.bat`**. On the `Account` tab, keep the default server URL `http://127.0.0.1:8751`. Create an account; then log in.
 4. On `Emulator Setup`, select a console and emulator. Browse to the emulator executable, enter its **exact installed version**, and save. RetroArch users also enter the **core name, core version and installed core `.dll` file**.
-5. On `Host Game`, choose game, matching file or folder, and multiplayer method. Click **Create room + check my game**. The app calculates a full SHA-256 fingerprint. For RetroArch the host should provide an address reachable by other players, typically `your-public-IP:55435` or a Hamachi VPN address; it is for the emulator netplay connection, not the lobby server.
-6. On the other PC, install the app and emulator, set its **lobby server URL** to your shared HTTPS server URL (see below), register a different account and enter their own emulator profile. Go to `Find Games`, select your lobby and choose their local copy of the *exact same game*. Click **Verify game + join**.
-7. Use `Waiting Room` to chat, mark ready and press **Launch emulator / play**. RetroArch classic netplay starts via command-line; Dolphin, Parsec, and game-network modes provide guided/manual setup.
+5. On `Controllers`, connect your gamepad via USB/Bluetooth and select **Scan connected devices**, or choose the keyboard/mouse entries. Select a device and click **Register selected**. Choose your registered input from the selector at the bottom. Gamepad scanning uses the optional `pygame`/SDL2 package, installed by the startup script when supported.
+6. On `Host Game`, choose game, matching file or folder, and multiplayer method. Click **Create room + check my game**. New rooms require a registered input profile. The app calculates a full SHA-256 fingerprint. For RetroArch the host should provide an address reachable by other players, typically `your-public-IP:55435` or a Hamachi VPN address; it is for the emulator netplay connection, not the lobby server.
+7. On the other PC, install the app and emulator, set its **lobby server URL** to your shared HTTPS server URL (see below), register a different account and register an input device. Go to `Find Games`, select your lobby and choose their local copy of the *exact same game*. Click **Verify game + join**.
+8. Use `Waiting Room` to see other players' declared input devices, chat, mark ready and press **Launch emulator / play**. RetroArch classic netplay starts via command-line; Dolphin, Parsec, and game-network modes provide guided/manual setup.
 
 ## First play session — Linux / Bazzite
 
@@ -30,6 +31,17 @@ chmod +x START_HUB_LINUX.sh START_APP_LINUX.sh
 ```
 
 On both operating systems, only *the lobby host* needs to run the hub server. Other players run only the desktop client and point it at the same server URL.
+
+## Controller registration and fair-play policy (October candidate)
+
+- **Device discovery:** Controller tab uses `pygame` (SDL2) to list plugged-in/paired gamepads by the operating system's name and SDL GUID. Supports common Xbox, PlayStation DualShock 4/DualSense, Nintendo Switch controllers and generic USB/Bluetooth gamepads when the OS/SDL detects them. An emulator still needs its own controller mapping; RetroRelay does not configure or route game inputs.
+- **Keyboard and mouse:** selectable PC input options, not proof a particular physical keyboard or mouse is attached. If pygame cannot be installed, these options remain available.
+- **Account registration:** players register one or more devices, and select which to use. Registrations are stored server-side per account, not shared globally. A maximum of 16 inputs can be registered per account. The account holder can remove them.
+- **Lobby requirement:** new rooms created with this client require a registered input for hosting, joining and marking ready. Existing v0.1 rooms are unchanged to preserve compatibility. Waiting-room members can see the declared type/name.
+- **NOT an anti-cheat guarantee:** SDL names and GUIDs can be spoofed, and remote controllers, remapping programs, macros, adapters and emulator-specific inputs are outside the hub's control. Labels such as *PlayStation-style* or *Xbox-style* are heuristic **not official-controller authenticity checks**. Generic and accessibility controllers are allowed; the software does not ban players based on input type.
+- **Privacy:** no HID serial number, raw keyboard/mouse input, button press logs, hardware IDs beyond optional SDL GUID, or controller telemetry are collected. Keep operating-system device details private except the chosen label shown to room members.
+
+Gamepad scanning installation by itself is not proof the game/emulator supports a particular controller. If no gamepad is found, make sure it is paired in your operating system first.
 
 ## Share your lobby server with friends on the Internet
 

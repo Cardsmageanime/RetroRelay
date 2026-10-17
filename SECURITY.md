@@ -10,3 +10,16 @@ RetroRelay v0.1.0 is an **early source-code preview for testers**, not a product
 - ROM/game hashes and emulator version strings are self-reported by clients and cannot independently prove compatibility or game ownership.
 
 For security problems, use a private message to the repository owner rather than including exploit details or personal data in a public issue.
+
+## Controller registration security boundaries (October preview)
+
+Controller names and SDL GUIDs are locally collected, self-reported descriptions. They
+are **not** tamper-resistant IDs, official manufacturer authentication or proof that an
+input device is free of macros/cheats. Any client can lie about the controller model,
+and game input is processed by the emulator or external remote-play system, not this
+hub. Never automatically ban accounts or accuse players based on these labels.
+
+The server enforces only that selected input registrations belong to the user and
+new controller-required rooms have selections before the user can join or ready up.
+No input events, keyboard captures, hardware serials or controller button histories
+are collected by the hub. Other room members see the chosen device label.

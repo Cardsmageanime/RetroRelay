@@ -8,6 +8,7 @@ import re
 import secrets
 import sqlite3
 import time
+from typing import Literal
 from pathlib import Path
 from contextlib import contextmanager
 
@@ -15,6 +16,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 
 from catalog import PLATFORMS, MODES, compatible_mode
+from controllers import controller_family
 
 USERNAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{2,23}$")
 HEX_RE = re.compile(r"^[a-f0-9]{64}$")
@@ -37,6 +39,8 @@ class RoomCreate(BaseModel):
     connection_hint: str = Field(default="", max_length=500)
     notes: str = Field(default="", max_length=400)
     max_players: int = Field(default=2, ge=2, le=16)
+    controller_required: bool = False
+    controller_id: str | None = None
 
     @field_validator("game_sha256")
     @classmethod
@@ -52,6 +56,20 @@ class JoinRoom(BaseModel):
     core_name: str = ""
     core_version: str = ""
     game_sha256: str
+    controller_id: str | None = None
+
+
+class DeviceRegistration(BaseModel):
+    kind: Literal["keyboard", "mouse", "gamepad"]
+    name: str = Field(min_length=1, max_length=100)
+    guid: str = Field(default="", max_length=64)
+
+    @field_validator("guid")
+    @classmethod
+    def validate_guid(cls, value: str) -> str:
+        if value and not re.fullmatch(r"[A-Fa-f0-9]{32}", value):
+            raise ValueError("Gamepad SDL GUID must be 32 hex characters")
+        return value.lower()
 
 
 class ChatMessage(BaseModel):
@@ -123,11 +141,25 @@ def init_db(path: str):
             message TEXT NOT NULL, created_at INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_messages_room ON messages(room_id,id);
+        CREATE TABLE IF NOT EXISTS devices (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL, name TEXT NOT NULL, guid TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            UNIQUE(user_id, kind, name, guid)
+        );
         """)
+        # Safe, additive migration for existing v0.1 server databases.
+        room_columns = {r["name"] for r in db.execute("PRAGMA table_info(rooms)")}
+        if "controller_required" not in room_columns:
+            db.execute("ALTER TABLE rooms ADD COLUMN controller_required INTEGER NOT NULL DEFAULT 0")
+        member_columns = {r["name"] for r in db.execute("PRAGMA table_info(members)")}
+        if "controller_id" not in member_columns:
+            db.execute("ALTER TABLE members ADD COLUMN controller_id TEXT")
 
 
 def create_app(db_path: str | None = None) -> FastAPI:
-    app = FastAPI(title="RetroRelay Hub", version="0.1.0")
+    app = FastAPI(title="RetroRelay Hub", version="0.2.0-pre")
     app.state.db_path = db_path or os.getenv(
         "RETRORELAY_DB", str(Path.home() / ".retrorelay_hub" / "lobbies.sqlite3")
     )
@@ -162,6 +194,22 @@ def create_app(db_path: str | None = None) -> FastAPI:
         if not db.execute("SELECT 1 FROM members WHERE room_id=? AND user_id=?", (room_id,user_id)).fetchone():
             raise HTTPException(status_code=403, detail="Join this room first")
 
+    def registered_device(db, user_id: int, device_id: str | None, required: bool):
+        if not device_id:
+            if required:
+                raise HTTPException(409, "Register and select an input device in Controllers first")
+            return None
+        device = db.execute("SELECT * FROM devices WHERE id=? AND user_id=?",
+                            (device_id, user_id)).fetchone()
+        if not device:
+            raise HTTPException(409, "Selected controller is not registered to this account")
+        return device["id"]
+
+    def device_info(row):
+        return {"id": row["id"], "kind": row["kind"], "name": row["name"],
+                "guid": row["guid"], "family": controller_family(row["name"], row["kind"]),
+                "verification": "self-reported / not authenticated"}
+
     def room_summary(db, room):
         host = db.execute("SELECT username FROM users WHERE id=?", (room["host_id"],)).fetchone()
         count = db.execute("SELECT COUNT(*) c FROM members WHERE room_id=?", (room["id"],)).fetchone()["c"]
@@ -172,11 +220,12 @@ def create_app(db_path: str | None = None) -> FastAPI:
             "game_title": room["game_title"], "mode": room["mode"],
             "notes": room["notes"], "max_players": room["max_players"],
             "players": count, "created_at": room["created_at"],
+            "controller_required": bool(room["controller_required"]),
         }
 
     @app.get("/health")
     def health():
-        return {"online": True, "version": "0.1.0"}
+        return {"online": True, "version": "0.2.0-pre"}
 
     @app.get("/catalog")
     def catalog():
@@ -222,6 +271,49 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def me_info(me=Depends(current_user)):
         return {"username": me["username"]}
 
+    @app.get("/devices")
+    def list_devices(request: Request, me=Depends(current_user)):
+        with conn(request) as db:
+            return [device_info(r) for r in db.execute(
+                "SELECT * FROM devices WHERE user_id=? ORDER BY created_at,id", (me["id"],))]
+
+    @app.post("/devices", status_code=201)
+    def register_device(body: DeviceRegistration, request: Request, me=Depends(current_user)):
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(422, "Device name is required")
+        if body.kind != "gamepad" and body.guid:
+            raise HTTPException(422, "Keyboard and mouse entries cannot have gamepad GUIDs")
+        with conn(request) as db:
+            db.execute("BEGIN IMMEDIATE")
+            existing = db.execute("SELECT * FROM devices WHERE user_id=? AND kind=? AND name=? AND guid=?",
+                                  (me["id"], body.kind, name, body.guid)).fetchone()
+            if existing:
+                return device_info(existing)
+            count = db.execute("SELECT COUNT(*) AS n FROM devices WHERE user_id=?", (me["id"],)).fetchone()["n"]
+            if count >= 16:
+                raise HTTPException(409, "Maximum 16 registered input profiles per account")
+            device_id = secrets.token_hex(12)
+            db.execute("INSERT INTO devices(id,user_id,kind,name,guid,created_at) VALUES(?,?,?,?,?,?)",
+                       (device_id, me["id"], body.kind, name, body.guid, now()))
+            row = db.execute("SELECT * FROM devices WHERE id=?", (device_id,)).fetchone()
+            db.commit()
+            return device_info(row)
+
+    @app.delete("/devices/{device_id}")
+    def delete_device(device_id: str, request: Request, me=Depends(current_user)):
+        with conn(request) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT id FROM devices WHERE id=? AND user_id=?",
+                             (device_id, me["id"])).fetchone()
+            if not row:
+                raise HTTPException(404, "Controller profile not found")
+            db.execute("UPDATE members SET controller_id=NULL,ready=0 WHERE user_id=? AND controller_id=?",
+                       (me["id"], device_id))
+            db.execute("DELETE FROM devices WHERE id=?", (device_id,))
+            db.commit()
+        return {"ok": True}
+
     @app.get("/rooms")
     def rooms(request: Request, me=Depends(current_user)):
         with conn(request) as db:
@@ -237,15 +329,17 @@ def create_app(db_path: str | None = None) -> FastAPI:
         room_id = secrets.token_hex(4).upper()
         with conn(request) as db:
             db.execute("BEGIN IMMEDIATE")
+            controller_id = registered_device(db, me["id"], body.controller_id, body.controller_required)
             db.execute("""INSERT INTO rooms
                (id,host_id,platform,emulator,emulator_version,core_name,core_version,
-                game_title,game_sha256,mode,connection_hint,notes,max_players,created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                game_title,game_sha256,mode,connection_hint,notes,max_players,created_at,controller_required)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                (room_id, me["id"], body.platform, body.emulator,
                 body.emulator_version.strip(), body.core_name.strip(), body.core_version.strip(),
                 body.game_title.strip(), body.game_sha256, body.mode, body.connection_hint.strip(),
-                body.notes.strip(), body.max_players, now()))
-            db.execute("INSERT INTO members(room_id,user_id,ready) VALUES(?,?,0)", (room_id,me["id"]))
+                body.notes.strip(), body.max_players, now(), int(body.controller_required)))
+            db.execute("INSERT INTO members(room_id,user_id,ready,controller_id) VALUES(?,?,0,?)",
+                       (room_id,me["id"], controller_id))
             db.commit()
         return {"id": room_id}
 
@@ -258,12 +352,17 @@ def create_app(db_path: str | None = None) -> FastAPI:
             mismatches = [key for key in require_values if getattr(body, key).strip() != room[key]]
             if mismatches:
                 raise HTTPException(409, "Cannot join: mismatched " + ", ".join(mismatches))
+            controller_id = registered_device(db, me["id"], body.controller_id, bool(room["controller_required"]))
             if not db.execute("SELECT 1 FROM members WHERE room_id=? AND user_id=?",
                               (room_id,me["id"])).fetchone():
                 count = db.execute("SELECT COUNT(*) c FROM members WHERE room_id=?", (room_id,)).fetchone()["c"]
                 if count >= room["max_players"]:
                     raise HTTPException(409, "Room is full")
-                db.execute("INSERT INTO members(room_id,user_id,ready) VALUES(?,?,0)", (room_id,me["id"]))
+                db.execute("INSERT INTO members(room_id,user_id,ready,controller_id) VALUES(?,?,0,?)",
+                           (room_id,me["id"],controller_id))
+            else:
+                db.execute("UPDATE members SET controller_id=?,ready=0 WHERE room_id=? AND user_id=?",
+                           (controller_id,room_id,me["id"]))
             db.commit()
         return {"ok": True}
 
@@ -272,18 +371,29 @@ def create_app(db_path: str | None = None) -> FastAPI:
         with conn(request) as db:
             room = require_room(db, room_id)
             require_member(db, room_id, me["id"])
-            participants = db.execute("""SELECT users.username,members.ready FROM members
-                JOIN users ON users.id=members.user_id WHERE room_id=? ORDER BY users.username""",
+            participants = db.execute("""SELECT users.username,members.ready,devices.name as device_name,
+                devices.kind as device_kind FROM members
+                JOIN users ON users.id=members.user_id
+                LEFT JOIN devices ON devices.id=members.controller_id
+                WHERE room_id=? ORDER BY users.username""",
                 (room_id,)).fetchall()
             return {**room_summary(db, room), "is_host": room["host_id"] == me["id"],
                     "connection_hint": room["connection_hint"],
-                    "members": [{"username": m["username"], "ready": bool(m["ready"])} for m in participants]}
+                    "members": [{"username": m["username"], "ready": bool(m["ready"]),
+                                 "controller": m["device_name"], "device_kind": m["device_kind"]}
+                                for m in participants]}
 
     @app.post("/rooms/{room_id}/ready")
     def set_ready(room_id: str, body: ReadyChange, request: Request, me=Depends(current_user)):
         with conn(request) as db:
-            require_room(db, room_id)
+            room = require_room(db, room_id)
             require_member(db, room_id, me["id"])
+            if body.ready and room["controller_required"]:
+                selected = db.execute("""SELECT 1 FROM members JOIN devices ON devices.id=members.controller_id
+                    WHERE members.room_id=? AND members.user_id=? AND devices.user_id=?""",
+                    (room_id,me["id"],me["id"])).fetchone()
+                if not selected:
+                    raise HTTPException(409, "Register a controller before marking ready")
             db.execute("UPDATE members SET ready=? WHERE room_id=? AND user_id=?",
                        (int(body.ready), room_id, me["id"]))
         return {"ok": True}
