@@ -1,4 +1,4 @@
-name: Controller preview release after merge
+name: Controllers and artwork preview release after merge
 
 on:
   push:
@@ -19,14 +19,14 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install -r requirements-dev.txt
       - run: python -m pytest -q
-      - name: Create controller preview only when source is on main
+      - name: Create combined preview only when source is on main
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           if [[ ! -f controllers.py || ! -f CONTROLLER_PREVIEW_NOTES.md ]]; then
-            echo 'Controller update is not merged; no v0.2.0 release.'
+            echo 'Controller and artwork update is not merged; no v0.2.0 release.'
             exit 0
           fi
           if gh release view v0.2.0 >/dev/null 2>&1; then
@@ -36,5 +36,5 @@ jobs:
           git archive --format=zip --output=RetroRelay_Source_v0.2.0.zip HEAD
           gh release create v0.2.0 RetroRelay_Source_v0.2.0.zip \
             --target "$GITHUB_SHA" \
-            --title 'RetroRelay v0.2.0 - Controller Preview' \
+            --title 'RetroRelay v0.2.0 - Controllers & Game Artwork Preview' \
             --notes-file CONTROLLER_PREVIEW_NOTES.md --prerelease
