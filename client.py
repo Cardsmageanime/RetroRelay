@@ -25,6 +25,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from catalog import MODES, PLATFORMS, compatible_mode
 from controllers import detect_input_devices
+from social import SOCIAL_PROVIDERS, validate_social_url
 
 CONFIG_DIR = Path.home() / ".retrorelay_client"
 CONFIG_FILE = CONFIG_DIR / "settings.json"
@@ -246,6 +247,7 @@ class RetroRelayApp(tk.Tk):
         self.notebook.pack(fill="both", expand=True, padx=20, pady=10)
         self.account_tab = ttk.Frame(self.notebook, padding=18)
         self.setup_tab = ttk.Frame(self.notebook, padding=18)
+        self.social_tab = ttk.Frame(self.notebook, padding=18)
         self.controller_tab = ttk.Frame(self.notebook, padding=18)
         self.host_tab = ttk.Frame(self.notebook, padding=18)
         self.discover_tab = ttk.Frame(self.notebook, padding=18)
@@ -254,6 +256,7 @@ class RetroRelayApp(tk.Tk):
             ("1 • Account", self.account_tab), ("2 • Emulator Setup", self.setup_tab),
             ("3 • Controllers", self.controller_tab), ("4 • Host Game", self.host_tab),
             ("5 • Find Games", self.discover_tab), ("6 • Waiting Room", self.room_tab),
+            ("7 • Social Accounts", self.social_tab),
         ]:
             self.notebook.add(tab, text=name)
         self.build_account()
@@ -262,6 +265,7 @@ class RetroRelayApp(tk.Tk):
         self.build_host()
         self.build_discover()
         self.build_room()
+        self.build_social()
         ttk.Label(self, textvariable=self.status_var, style="Small.TLabel").pack(anchor="w", padx=23, pady=(0, 14))
 
     def build_account(self):
@@ -290,6 +294,82 @@ class RetroRelayApp(tk.Tk):
         ttk.Label(t, text="First test: run the hub server on your own PC and keep http://127.0.0.1:8751.\n"
                   "For friends over the Internet, deploy the hub with HTTPS and use its public URL.\n"
                   "Every player uses the same lobby server URL.", style="Small.TLabel", justify="left").pack(anchor="w", pady=10)
+
+    def build_social(self):
+        t = self.social_tab
+        self.section(t, "Social accounts & creator channels")
+        ttk.Label(t, text="Save your public social profile links here. These links are NOT verified or connected using OAuth.\n"
+                  "Only you can see them in this preview. Never enter passwords or stream keys.",
+                  style="Small.TLabel", justify="left").pack(anchor="w", pady=(0, 18))
+        row = ttk.Frame(t)
+        row.pack(fill="x", pady=4)
+        self.social_provider = tk.StringVar(value="twitch")
+        ttk.Label(row, text="Platform").pack(side="left", padx=(0, 10))
+        self.social_combo = ttk.Combobox(row, values=list(SOCIAL_PROVIDERS),
+                                          textvariable=self.social_provider, state="readonly", width=16)
+        self.social_combo.pack(side="left")
+        ttk.Label(row, text="Public profile URL").pack(side="left", padx=(15, 8))
+        self.social_url = tk.StringVar()
+        ttk.Entry(row, textvariable=self.social_url, width=62).pack(side="left", fill="x", expand=True)
+        buttons = ttk.Frame(t)
+        buttons.pack(anchor="w", pady=13)
+        ttk.Button(buttons, text="Save unverified link", command=self.save_social_link).pack(side="left", padx=(0, 8))
+        ttk.Button(buttons, text="Remove selected", command=self.remove_social_link).pack(side="left", padx=(0, 8))
+        ttk.Button(buttons, text="Open selected link", command=self.open_social_link).pack(side="left", padx=(0, 8))
+        ttk.Button(buttons, text="Refresh", command=self.load_social_links).pack(side="left")
+        self.social_tree = ttk.Treeview(t, columns=("platform", "url", "verification"),
+                                         show="headings", height=9)
+        for key, width in (("platform", 120), ("url", 610), ("verification", 150)):
+            self.social_tree.heading(key, text=key.title())
+            self.social_tree.column(key, width=width)
+        self.social_tree.pack(fill="both", expand=True, pady=10)
+        self.social_tree.bind("<<TreeviewSelect>>", self.selected_social_link)
+        ttk.Label(t, text="Full Twitch/YouTube/TikTok/Facebook authorization requires separate provider app registration,"
+                  " permission review and secure OAuth tokens; that is not implemented yet.",
+                  style="Small.TLabel", wraplength=920).pack(anchor="w")
+
+    def selected_social_link(self, event=None):
+        selection = self.social_tree.selection()
+        if selection:
+            row = self.social_tree.item(selection[0])["values"]
+            self.social_provider.set(str(row[0]).lower())
+            self.social_url.set(str(row[1]))
+
+    def load_social_links(self):
+        if not self.api.token:
+            return self.report_error("Log in to manage your social accounts")
+        def done(items):
+            for item in self.social_tree.get_children():
+                self.social_tree.delete(item)
+            for item in items:
+                self.social_tree.insert("", "end", iid=item["provider"],
+                    values=(item["provider"], item["url"], "Unverified / private"))
+        self.bg(lambda: self.api.call("GET", "/social-links"), done, "Loading social links...")
+
+    def save_social_link(self):
+        if not self.api.token:
+            return self.report_error("Log in first")
+        provider = self.social_provider.get()
+        try:
+            url = validate_social_url(provider, self.social_url.get())
+        except ValueError as exc:
+            return self.report_error(str(exc))
+        self.bg(lambda: self.api.call("PUT", "/social-links/" + provider, {"url": url}),
+                lambda _: self.load_social_links(), "Saving unverified social profile link...")
+
+    def remove_social_link(self):
+        if not self.api.token:
+            return self.report_error("Log in first")
+        provider = self.social_provider.get()
+        self.bg(lambda: self.api.call("DELETE", "/social-links/" + provider),
+                lambda _: self.load_social_links(), "Removing social profile link...")
+
+    def open_social_link(self):
+        try:
+            url = validate_social_url(self.social_provider.get(), self.social_url.get())
+        except ValueError as exc:
+            return self.report_error(str(exc))
+        webbrowser.open(url)
 
     def make_combos(self, parent, platform_var, emu_var, row):
         self.label(parent, "Console / platform", row)
@@ -564,6 +644,7 @@ class RetroRelayApp(tk.Tk):
             self.refresh_lobbies()
             self.scan_controllers()
             self.load_registered_controllers()
+            self.load_social_links()
         username, password = self.login_user.get(), self.login_pass.get()
         self.bg(lambda: api.call("POST", "/login", {"username": username,
                    "password": password}), done, "Signing in...")
@@ -599,6 +680,8 @@ class RetroRelayApp(tk.Tk):
         self.username = None
         self.current_room = None
         self.registered_devices = []
+        for item in self.social_tree.get_children():
+            self.social_tree.delete(item)
         self.controller_labels = {}
         self.registered_combo["values"] = []
         self.selected_controller_label.set("")

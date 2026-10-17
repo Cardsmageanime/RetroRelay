@@ -144,3 +144,9 @@ python -m pytest -q
 Lobby hosts may upload **original or licensed** PNG/JPEG/WebP art (<800 KB) and confirm that they are permitted to publish it. Other signed-in users see a thumbnail while browsing and in the waiting room. Game titles support Unicode across platforms and languages; unillustrated games show text fallback. The app does not include an unlicensed worldwide cover-art library. See `ARTWORK_AND_PLAY_MODES.md`.
 
 For host-only-streamed games, select **Parsec shared-controller remote play**. The host needs the game and Parsec configured; joining guests do not need their own ROM or the emulator. They do still register their input devices and connect via Parsec (a separate service), with the host approving access. For native netplay, each player still needs a matching game copy/version. **RetroRelay does not host or distribute ROMs or commercial game artwork.**
+
+## October v0.2 preview: Social Accounts (unverified profile links)
+
+The desktop application now includes **7 • Social Accounts** where signed-in users can save, open, replace, or delete private links to their Twitch, YouTube, TikTok, Facebook, and Instagram profiles. Each URL is checked against an exact provider HTTPS domain and limited profile URL pattern. The server stores links per RetroRelay account; links are **private to the owner** and **unverified**. Users cannot see other users' links, and this feature does not log into social platforms or transmit passwords or stream keys.
+
+**Future OAuth authorization is separate:** actual provider account linking, streaming/chat permissions, automatic live status, and cross-posting are **not implemented**. They require developer applications, official OAuth authorization, registered callback URLs, consent/privacy policies, and sometimes provider approval. See GitHub Issue #6. Twitch streaming and dual chat remains a separately scoped January update (Issue #3).

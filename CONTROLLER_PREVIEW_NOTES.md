@@ -21,3 +21,6 @@
 - In Parsec mode, guests only need a registered controller (no game copy or emulator matching). The host provides their own game and Parsec streaming connection, which remains separately configured and approved by the host.
 - Native emulator netplay still requires matching game files and versions. No ROM/ISO downloading or automatic copyrighted cover scraping is provided.
 - For details and licensing limits see `ARTWORK_AND_PLAY_MODES.md`.
+
+## October addition: Social Accounts
+Added a private Social Accounts tab allowing users to save strictly validated, **unverified** HTTPS Twitch/YouTube/TikTok/Facebook/Instagram profile URLs. No OAuth connection, verification, or platform-specific posting/streaming is enabled. Planning tracked in GitHub Issue #6; Twitch live stream integration remains for January.

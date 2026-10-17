@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field, field_validator
 from catalog import PLATFORMS, MODES, compatible_mode
 from controllers import controller_family
 from artwork import clean_artwork
+from social import SOCIAL_PROVIDERS, validate_social_url
 
 USERNAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{2,23}$")
 HEX_RE = re.compile(r"^[a-f0-9]{64}$")
@@ -66,6 +67,10 @@ class ArtworkUpload(BaseModel):
     image_base64: str = Field(min_length=1, max_length=1_100_000)
     rights_confirmed: bool = False
 
+
+
+class SocialLink(BaseModel):
+    url: str = Field(min_length=10, max_length=280)
 
 
 class DeviceRegistration(BaseModel):
@@ -154,6 +159,11 @@ def init_db(path: str):
             room_id TEXT PRIMARY KEY REFERENCES rooms(id) ON DELETE CASCADE,
             image_png BLOB NOT NULL,
             uploaded_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS social_links (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            provider TEXT NOT NULL, url TEXT NOT NULL, updated_at INTEGER NOT NULL,
+            PRIMARY KEY(user_id,provider)
         );
         CREATE TABLE IF NOT EXISTS devices (
             id TEXT PRIMARY KEY,
@@ -287,6 +297,46 @@ def create_app(db_path: str | None = None) -> FastAPI:
     @app.get("/me")
     def me_info(me=Depends(current_user)):
         return {"username": me["username"]}
+
+    @app.get("/social/providers")
+    def social_providers():
+        return [{"id": provider, "name": entry["name"], "oauth_enabled": False}
+                for provider, entry in SOCIAL_PROVIDERS.items()]
+
+    @app.get("/social-links")
+    def social_links(request: Request, me=Depends(current_user)):
+        """Private-to-owner links; not proof of social account ownership."""
+        with conn(request) as db:
+            return [{"provider": row["provider"], "url": row["url"],
+                     "verified": False, "visibility": "private"}
+                    for row in db.execute(
+                        "SELECT provider,url FROM social_links WHERE user_id=? ORDER BY provider",
+                        (me["id"],))]
+
+    @app.put("/social-links/{provider}")
+    def save_social_link(provider: str, body: SocialLink, request: Request,
+                         me=Depends(current_user)):
+        try:
+            url = validate_social_url(provider, body.url)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        provider = provider.lower().strip()
+        with conn(request) as db:
+            db.execute("""INSERT INTO social_links(user_id,provider,url,updated_at)
+                       VALUES (?,?,?,?) ON CONFLICT(user_id,provider)
+                       DO UPDATE SET url=excluded.url,updated_at=excluded.updated_at""",
+                       (me["id"],provider,url,now()))
+        return {"provider": provider, "url": url, "verified": False,
+                "visibility": "private"}
+
+    @app.delete("/social-links/{provider}")
+    def remove_social_link(provider: str, request: Request, me=Depends(current_user)):
+        if provider not in SOCIAL_PROVIDERS:
+            raise HTTPException(404, "Unknown social platform")
+        with conn(request) as db:
+            db.execute("DELETE FROM social_links WHERE user_id=? AND provider=?",
+                       (me["id"],provider))
+        return {"ok": True}
 
     @app.get("/devices")
     def list_devices(request: Request, me=Depends(current_user)):

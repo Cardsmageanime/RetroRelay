@@ -26,3 +26,6 @@ are collected by the hub. Other room members see the chosen device label.
 
 ### Game artwork preview limitations
 Hosts affirm they may publish the art. This is a self-declaration, not a license audit or content-moderation pipeline. A public production hub needs abuse reports, moderation, per-user storage/rate quotas, hardened image processing with sandboxing, and a takedown process. The server strips metadata and transcodes only small source PNG/JPEG/WebP images; do not treat that as complete security isolation. The client does not fetch arbitrary user-provided external image URLs. The lobby never transfers game ROM/ISO bytes.
+
+## Social profile URL preview
+Stored social URLs are self-reported, private per account, and unverified. Allowlisted provider hostname/path, HTTPS, and no query/fragment/port/userinfo prevent common unsafe URL forms; opening an external website is at the user's discretion. **No provider OAuth, proof of channel ownership, or access tokens are involved.** Real social connections must use official consent and server-managed token storage, revocation, state/PKCE as required, rate limiting, and platform review.
