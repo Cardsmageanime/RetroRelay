@@ -21,6 +21,8 @@ from catalog import PLATFORMS, MODES, compatible_mode
 from controllers import controller_family
 from artwork import clean_artwork
 from social import SOCIAL_PROVIDERS, validate_social_url
+from mfa import (create_secret, encrypt_secret, decrypt_secret, provisioning_uri,
+                 match_counter, new_recovery_codes, recovery_hash, encryption_key)
 
 USERNAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{2,23}$")
 HEX_RE = re.compile(r"^[a-f0-9]{64}$")
@@ -71,6 +73,24 @@ class ArtworkUpload(BaseModel):
 
 class SocialLink(BaseModel):
     url: str = Field(min_length=10, max_length=280)
+
+
+class MFAPassword(BaseModel):
+    password: str = Field(min_length=1, max_length=256)
+
+
+class MFACode(BaseModel):
+    code: str = Field(min_length=6, max_length=32)
+
+
+class MFAChallenge(BaseModel):
+    challenge: str = Field(min_length=32, max_length=256)
+    code: str = Field(min_length=6, max_length=32)
+
+
+class MFADisable(BaseModel):
+    password: str = Field(min_length=1, max_length=256)
+    code: str = Field(min_length=6, max_length=32)
 
 
 class DeviceRegistration(BaseModel):
@@ -164,6 +184,32 @@ def init_db(path: str):
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             provider TEXT NOT NULL, url TEXT NOT NULL, updated_at INTEGER NOT NULL,
             PRIMARY KEY(user_id,provider)
+        );
+        CREATE TABLE IF NOT EXISTS mfa_accounts (
+            user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            secret_encrypted TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 0,
+            last_step INTEGER NOT NULL DEFAULT -1,
+            created_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS mfa_recovery (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            code_hash TEXT NOT NULL,
+            PRIMARY KEY(user_id,code_hash)
+        );
+        CREATE TABLE IF NOT EXISTS mfa_challenges (
+            challenge_hash TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            expires_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_mfa_challenges_user ON mfa_challenges(user_id);
+        CREATE TABLE IF NOT EXISTS auth_attempts (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            purpose TEXT NOT NULL,
+            count INTEGER NOT NULL,
+            started_at INTEGER NOT NULL,
+            blocked_until INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY(user_id,purpose)
         );
         CREATE TABLE IF NOT EXISTS devices (
             id TEXT PRIMARY KEY,
@@ -274,19 +320,217 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 raise HTTPException(409, "Username is taken")
         return {"message": "Account created; log in to continue"}
 
+    def attempts_check(db, user_id: int, purpose: str):
+        row = db.execute("SELECT blocked_until FROM auth_attempts WHERE user_id=? AND purpose=?",
+                         (user_id, purpose)).fetchone()
+        if row and row["blocked_until"] > now():
+            raise HTTPException(429, "Too many attempts. Try again later.")
+
+    def attempts_fail(db, user_id: int, purpose: str):
+        clock = now()
+        row = db.execute("SELECT count,started_at FROM auth_attempts WHERE user_id=? AND purpose=?",
+                         (user_id, purpose)).fetchone()
+        count = row["count"] + 1 if row and clock - row["started_at"] < 600 else 1
+        start = row["started_at"] if row and clock - row["started_at"] < 600 else clock
+        block = clock + 300 if count >= 5 else 0
+        db.execute("""INSERT INTO auth_attempts(user_id,purpose,count,started_at,blocked_until)
+                      VALUES(?,?,?,?,?) ON CONFLICT(user_id,purpose) DO UPDATE SET
+                      count=excluded.count,started_at=excluded.started_at,
+                      blocked_until=excluded.blocked_until""",
+                   (user_id, purpose, count, start, block))
+
+    def attempts_reset(db, user_id: int, purpose: str):
+        db.execute("DELETE FROM auth_attempts WHERE user_id=? AND purpose=?", (user_id, purpose))
+
+    def check_password(row, password: str):
+        expected = passhash(password, bytes.fromhex(row["salt"]))
+        return hmac.compare_digest(expected, row["password_hash"])
+
+    def totp_or_recovery(db, row, code: str):
+        """Caller must have BEGIN IMMEDIATE; consuming this result is atomic."""
+        try:
+            secret = decrypt_secret(row["secret_encrypted"])
+        except ValueError as exc:
+            raise HTTPException(503, "MFA server configuration unavailable") from exc
+        step = match_counter(secret, code, row["last_step"])
+        if step is not None:
+            db.execute("UPDATE mfa_accounts SET last_step=? WHERE user_id=?",
+                       (step, row["user_id"]))
+            return True
+        if re.fullmatch(r"[A-Fa-f0-9]{32}", code):
+            code_hash = recovery_hash(code.lower())
+            used = db.execute("DELETE FROM mfa_recovery WHERE user_id=? AND code_hash=?",
+                              (row["user_id"], code_hash))
+            return used.rowcount == 1
+        return False
+
     @app.post("/login")
     def login(body: Credentials, request: Request):
         with conn(request) as db:
+            db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT * FROM users WHERE username_key=?", (body.username.casefold(),)).fetchone()
-            # Always calculate a hash so unknown accounts take a similar amount of work.
-            salt = bytes.fromhex(row["salt"]) if row else b"\x00" * 16
+            if row:
+                attempts_check(db, row["id"], "password")
+            # Do not reveal if a username exists by skipping expensive verification.
+            salt = bytes.fromhex(row["salt"]) if row else bytes(16)
             candidate = passhash(body.password, salt)
             if not row or not hmac.compare_digest(candidate, row["password_hash"]):
+                if row:
+                    attempts_fail(db, row["id"], "password")
+                db.commit()
                 raise HTTPException(401, "Incorrect username or password")
+            attempts_reset(db, row["id"], "password")
+            mfa = db.execute("SELECT enabled FROM mfa_accounts WHERE user_id=?",
+                             (row["id"],)).fetchone()
+            if mfa and mfa["enabled"]:
+                try:
+                    encryption_key()
+                except ValueError as exc:
+                    raise HTTPException(503, "MFA server configuration unavailable") from exc
+                db.execute("DELETE FROM mfa_challenges WHERE user_id=? OR expires_at<?",
+                           (row["id"], now()))
+                challenge = secrets.token_urlsafe(36)
+                db.execute("""INSERT INTO mfa_challenges(challenge_hash,user_id,expires_at)
+                              VALUES(?,?,?)""",
+                           (hashlib.sha256(challenge.encode()).hexdigest(), row["id"], now()+300))
+                db.commit()
+                return {"mfa_required": True, "challenge": challenge}
             token = secrets.token_urlsafe(36)
             db.execute("INSERT INTO sessions(token_hash,user_id,created_at) VALUES(?,?,?)",
                        (hashlib.sha256(token.encode()).hexdigest(), row["id"], now()))
-        return {"token": token, "username": row["username"]}
+            db.commit()
+            return {"token": token, "username": row["username"]}
+
+    @app.post("/mfa/login")
+    def mfa_login(body: MFAChallenge, request: Request):
+        challenge_hash = hashlib.sha256(body.challenge.encode()).hexdigest()
+        with conn(request) as db:
+            db.execute("BEGIN IMMEDIATE")
+            challenge = db.execute("SELECT user_id,expires_at FROM mfa_challenges WHERE challenge_hash=?",
+                                   (challenge_hash,)).fetchone()
+            if not challenge or challenge["expires_at"] <= now():
+                raise HTTPException(401, "MFA login challenge expired; sign in again")
+            uid = challenge["user_id"]
+            attempts_check(db, uid, "otp")
+            row = db.execute("SELECT * FROM mfa_accounts WHERE user_id=? AND enabled=1",
+                             (uid,)).fetchone()
+            if not row:
+                raise HTTPException(401, "MFA enrollment changed; sign in again")
+            if not totp_or_recovery(db, row, body.code):
+                attempts_fail(db, uid, "otp")
+                db.commit()
+                raise HTTPException(401, "Incorrect authenticator or recovery code")
+            attempts_reset(db, uid, "otp")
+            db.execute("DELETE FROM mfa_challenges WHERE user_id=?", (uid,))
+            user = db.execute("SELECT username FROM users WHERE id=?", (uid,)).fetchone()
+            token = secrets.token_urlsafe(36)
+            db.execute("INSERT INTO sessions(token_hash,user_id,created_at) VALUES(?,?,?)",
+                       (hashlib.sha256(token.encode()).hexdigest(), uid, now()))
+            db.commit()
+            return {"token": token, "username": user["username"]}
+
+    @app.get("/mfa/status")
+    def mfa_status(request: Request, me=Depends(current_user)):
+        with conn(request) as db:
+            row = db.execute("SELECT enabled FROM mfa_accounts WHERE user_id=?",
+                             (me["id"],)).fetchone()
+        return {"enabled": bool(row and row["enabled"]), "method": "totp",
+                "server_configured": bool(os.getenv("RETRORELAY_MFA_KEY", "").strip())}
+
+    @app.post("/mfa/setup")
+    def mfa_setup(body: MFAPassword, request: Request, me=Depends(current_user)):
+        try:
+            encryption_key()
+        except ValueError as exc:
+            raise HTTPException(503, "MFA is not configured by this server operator") from exc
+        with conn(request) as db:
+            db.execute("BEGIN IMMEDIATE")
+            user = db.execute("SELECT * FROM users WHERE id=?", (me["id"],)).fetchone()
+            attempts_check(db, me["id"], "manage")
+            if not check_password(user, body.password):
+                attempts_fail(db, me["id"], "manage")
+                db.commit()
+                raise HTTPException(401, "Current password is incorrect")
+            row = db.execute("SELECT enabled FROM mfa_accounts WHERE user_id=?",
+                             (me["id"],)).fetchone()
+            if row and row["enabled"]:
+                raise HTTPException(409, "Disable existing MFA with your existing code first")
+            secret = create_secret()
+            db.execute("""INSERT INTO mfa_accounts(user_id,secret_encrypted,enabled,created_at,last_step)
+                          VALUES(?,?,0,?,-1) ON CONFLICT(user_id) DO UPDATE SET
+                          secret_encrypted=excluded.secret_encrypted,enabled=0,
+                          created_at=excluded.created_at,last_step=-1""",
+                       (me["id"], encrypt_secret(secret), now()))
+            attempts_reset(db, me["id"], "manage")
+            db.commit()
+            return {"secret": secret, "uri": provisioning_uri(user["username"], secret),
+                    "expires_in": 900,
+                    "instruction": "Add this secret to your phone authenticator, then confirm its six-digit code."}
+
+    @app.post("/mfa/confirm")
+    def mfa_confirm(body: MFACode, request: Request, me=Depends(current_user)):
+        with conn(request) as db:
+            db.execute("BEGIN IMMEDIATE")
+            attempts_check(db, me["id"], "otp")
+            row = db.execute("SELECT * FROM mfa_accounts WHERE user_id=? AND enabled=0",
+                             (me["id"],)).fetchone()
+            if not row or now() - row["created_at"] > 900:
+                raise HTTPException(409, "No recent pending MFA enrollment")
+            if not re.fullmatch(r"[0-9]{6}", body.code):
+                attempts_fail(db, me["id"], "otp")
+                db.commit()
+                raise HTTPException(401, "Invalid authenticator code")
+            try:
+                step = match_counter(decrypt_secret(row["secret_encrypted"]),
+                                     body.code, row["last_step"])
+            except ValueError as exc:
+                raise HTTPException(503, "MFA server configuration unavailable") from exc
+            if step is None:
+                attempts_fail(db, me["id"], "otp")
+                db.commit()
+                raise HTTPException(401, "Invalid authenticator code")
+            backup_codes = new_recovery_codes()
+            db.execute("UPDATE mfa_accounts SET enabled=1,last_step=? WHERE user_id=?",
+                       (step, me["id"]))
+            db.execute("DELETE FROM mfa_recovery WHERE user_id=?", (me["id"],))
+            db.executemany("INSERT INTO mfa_recovery(user_id,code_hash) VALUES(?,?)",
+                           [(me["id"], recovery_hash(code)) for code in backup_codes])
+            # Require all other devices to sign in with the newly enabled factor.
+            db.execute("DELETE FROM sessions WHERE user_id=? AND token_hash<>?",
+                       (me["id"], me["token_hash"]))
+            attempts_reset(db, me["id"], "otp")
+            db.commit()
+            return {"enabled": True, "recovery_codes": backup_codes,
+                    "warning": "Save these recovery codes securely; each works once and they are not shown again."}
+
+    @app.post("/mfa/disable")
+    def mfa_disable(body: MFADisable, request: Request, me=Depends(current_user)):
+        with conn(request) as db:
+            db.execute("BEGIN IMMEDIATE")
+            attempts_check(db, me["id"], "manage")
+            attempts_check(db, me["id"], "otp")
+            user = db.execute("SELECT * FROM users WHERE id=?", (me["id"],)).fetchone()
+            row = db.execute("SELECT * FROM mfa_accounts WHERE user_id=? AND enabled=1",
+                             (me["id"],)).fetchone()
+            if not row:
+                raise HTTPException(409, "MFA is not enabled")
+            if not check_password(user, body.password):
+                attempts_fail(db, me["id"], "manage")
+                db.commit()
+                raise HTTPException(401, "Current password is incorrect")
+            if not totp_or_recovery(db, row, body.code):
+                attempts_fail(db, me["id"], "otp")
+                db.commit()
+                raise HTTPException(401, "Authenticator/recovery code was rejected")
+            db.execute("DELETE FROM mfa_accounts WHERE user_id=?", (me["id"],))
+            db.execute("DELETE FROM mfa_recovery WHERE user_id=?", (me["id"],))
+            db.execute("DELETE FROM mfa_challenges WHERE user_id=?", (me["id"],))
+            db.execute("DELETE FROM sessions WHERE user_id=? AND token_hash<>?",
+                       (me["id"], me["token_hash"]))
+            attempts_reset(db, me["id"], "manage")
+            attempts_reset(db, me["id"], "otp")
+            db.commit()
+            return {"enabled": False, "ok": True}
 
     @app.post("/logout")
     def logout(request: Request, me=Depends(current_user)):
