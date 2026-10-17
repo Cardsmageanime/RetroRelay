@@ -22,7 +22,7 @@ RetroRelay is a beginner-friendly, self-hostable hub connecting players of class
 | Date | Version | Milestone | Verified status | Tracker |
 |---|---|---|---|---|
 | October 2026 | v0.1.0 | Source-code starter with accounts, compatible-game lobbies, chat, match checks and emulator launch helpers | **Published early preview** | [Release v0.1.0](https://github.com/Cardsmageanime/RetroRelay/releases/tag/v0.1.0) |
-| **October 20, 2026** | **v0.2.0** | Social profile links, controller discovery/registration, lobby artwork and Parsec controller-only guest rooms | **In review** (not published) | [PR #2](https://github.com/Cardsmageanime/RetroRelay/pull/2), [Issue #6](https://github.com/Cardsmageanime/RetroRelay/issues/6) |
+| **October 20, 2026** | **v0.2.0** | Social profile links, controller discovery/registration, lobby artwork, Parsec controller-only guest rooms and phone-authenticator MFA security preview | **In review** (not published) | [PR #2](https://github.com/Cardsmageanime/RetroRelay/pull/2), [MFA Issue #9](https://github.com/Cardsmageanime/RetroRelay/issues/9), [Issue #6](https://github.com/Cardsmageanime/RetroRelay/issues/6) |
 | **January 16, 2027** | **v0.3.0** | Twitch account authorization, OBS-assisted broadcasting, separate Twitch and RetroRelay lobby chats, streamer dashboard | **Planned** | [Issue #3](https://github.com/Cardsmageanime/RetroRelay/issues/3) |
 | **April 16, 2027** | **v0.4.0** | Low-latency netplay/rollback where emulator supports it, network diagnostics and controller input test/remapping wizard | **Planned** | [Issue #4](https://github.com/Cardsmageanime/RetroRelay/issues/4) |
 | **August 16, 2027** | **v0.5.0** | Social gaming profiles, app/room themes, licensed or user-owned images, free Relay Store, OBS controller-display overlays | **Planned** | [Issue #5](https://github.com/Cardsmageanime/RetroRelay/issues/5) |
@@ -36,6 +36,8 @@ RetroRelay is a beginner-friendly, self-hostable hub connecting players of class
 **v0.1.0 — published starter:** Accounts, rooms, chat, matching game fingerprints and emulator versions, launch helpers, basic self-hosted server. This is a **source-code preview**, not a finished installer or hardened global hosting service.
 
 **v0.2.0 — October 20 target:**
+- **Account security:** Optional phone TOTP MFA with password verification, encrypted setup secrets, one-use recovery codes, login attempt throttling, and step-up requirements for disabling MFA. A PIN alone does not count as independent MFA; SMS delivery is not part of the October preview. Pending security/CI validation before release ([Issue #9](https://github.com/Cardsmageanime/RetroRelay/issues/9)).
+
 - Social Accounts tab starts with **private, unverified** Twitch/YouTube/TikTok/Facebook/Instagram profile URLs. Direct OAuth account connections require separate developer apps, authorization flows and, sometimes, provider review. Do not call a pasted URL a connected account.
 - Discover SDL-supported PlayStation/Xbox/Nintendo/generic gamepads, and offer keyboard/mouse registration; users choose an input profile. Controller name/GUID does **not** certify official hardware or stop cheating.
 - Rights-cleared host-supplied artwork previews, international titles, and lobby images; no bundled unlicensed game art library.
