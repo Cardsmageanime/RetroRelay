@@ -2,6 +2,8 @@ services:
   hub:
     build: .
     restart: unless-stopped
+    environment:
+      RETRORELAY_MFA_KEY: ${RETRORELAY_MFA_KEY:-}
     volumes:
       - hub_data:/appdata
     expose:
