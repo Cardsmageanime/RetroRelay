@@ -21,7 +21,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_STEP_SUMMARY: ${{ github.step_summary }}
         run: python scripts/release_download_metrics.py
       - name: Save count snapshot
         uses: actions/upload-artifact@v4
