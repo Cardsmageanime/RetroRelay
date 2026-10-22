@@ -10,6 +10,14 @@
 - Dolphin, emulator native networks, Parsec and Hamachi integration guides/launch helpers.
 - Explicit platform allowlist: last Nintendo = Wii U, Sony = PS3, Sega = Dreamcast, Xbox = Xbox 360.
 
+## October 2026 controller update candidate (implemented, awaiting release review)
+
+- Detect SDL2 gamepads and provide system keyboard/mouse options in a Controllers tab.
+- Store player-selected input profiles per authenticated account, with register/list/remove endpoints.
+- Optional `controller_required` flag for lobbies and server-side selection enforcement for new rooms.
+- Show selected device names to the waiting-room members and preserve legacy database/room behavior.
+- Explicitly **not** tamperproof, authentic-hardware verification, input interception, or anti-cheat attestation.
+
 ## Next implementation milestones (not provided yet)
 
 1. **Windows/Linux installers and onboarding:** make signed Windows `.exe`/installer and Linux Flatpak/AppImage, built with PyInstaller or an equivalent. Add dependency scans and machine-readable version detection.

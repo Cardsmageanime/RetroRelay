@@ -6,6 +6,7 @@ or magically add a network stack to an emulator.
 from __future__ import annotations
 
 import hashlib
+import base64
 import ipaddress
 import json
 import os
@@ -20,9 +21,11 @@ import urllib.request
 import webbrowser
 from urllib.parse import urlsplit
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from catalog import MODES, PLATFORMS, compatible_mode
+from controllers import detect_input_devices
+from social import SOCIAL_PROVIDERS, validate_social_url
 
 CONFIG_DIR = Path.home() / ".retrorelay_client"
 CONFIG_FILE = CONFIG_DIR / "settings.json"
@@ -163,6 +166,18 @@ class API:
             raise APIError("Cannot reach the lobby server. Check Wi-Fi/Internet and server URL. " + str(err)) from err
 
 
+    def image_bytes(self, room_id: str) -> bytes:
+        if not re.fullmatch(r"[A-Fa-f0-9]{8}", room_id):
+            raise APIError("Invalid room ID")
+        req = urllib.request.Request(self.base + "/rooms/" + room_id + "/artwork")
+        req.add_header("Authorization", "Bearer " + (self.token or ""))
+        with urllib.request.urlopen(req, timeout=12) as response:
+            data = response.read(410_000)
+        if len(data) > 400_000 or not data.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise APIError("Artwork is not a valid-sized PNG thumbnail")
+        return data
+
+
 class RetroRelayApp(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -175,6 +190,11 @@ class RetroRelayApp(tk.Tk):
         self.username = None
         self.current_room = None
         self.rooms = {}
+        self.cover_cache = {}
+        self.cover_photo = None
+        self.detected_devices = []
+        self.registered_devices = []
+        self.controller_labels = {}
         self.last_msg_id = 0
         self.current_ready = False
         self.room_polling = False
@@ -227,20 +247,25 @@ class RetroRelayApp(tk.Tk):
         self.notebook.pack(fill="both", expand=True, padx=20, pady=10)
         self.account_tab = ttk.Frame(self.notebook, padding=18)
         self.setup_tab = ttk.Frame(self.notebook, padding=18)
+        self.social_tab = ttk.Frame(self.notebook, padding=18)
+        self.controller_tab = ttk.Frame(self.notebook, padding=18)
         self.host_tab = ttk.Frame(self.notebook, padding=18)
         self.discover_tab = ttk.Frame(self.notebook, padding=18)
         self.room_tab = ttk.Frame(self.notebook, padding=18)
         for name, tab in [
             ("1 • Account", self.account_tab), ("2 • Emulator Setup", self.setup_tab),
-            ("3 • Host Game", self.host_tab), ("4 • Find Games", self.discover_tab),
-            ("5 • Waiting Room", self.room_tab),
+            ("3 • Controllers", self.controller_tab), ("4 • Host Game", self.host_tab),
+            ("5 • Find Games", self.discover_tab), ("6 • Waiting Room", self.room_tab),
+            ("7 • Social Accounts", self.social_tab),
         ]:
             self.notebook.add(tab, text=name)
         self.build_account()
         self.build_setup()
+        self.build_controllers()
         self.build_host()
         self.build_discover()
         self.build_room()
+        self.build_social()
         ttk.Label(self, textvariable=self.status_var, style="Small.TLabel").pack(anchor="w", padx=23, pady=(0, 14))
 
     def build_account(self):
@@ -266,9 +291,93 @@ class RetroRelayApp(tk.Tk):
         ttk.Button(buttons, text="Create account", command=self.register).pack(side="left", padx=(0, 10))
         ttk.Button(buttons, text="Test server", command=self.test_connection).pack(side="left", padx=(0, 10))
         ttk.Button(buttons, text="Log out", command=self.logout).pack(side="left")
+        security_row = ttk.Frame(t)
+        security_row.pack(anchor="w", pady=(0, 8))
+        ttk.Button(security_row, text="Enable phone 2-step", command=self.enable_mfa).pack(
+            side="left", padx=(0, 9))
+        ttk.Button(security_row, text="Disable 2-step", command=self.disable_mfa).pack(side="left")
+        self.mfa_status_var = tk.StringVar(value="Phone two-step authentication: log in to check status")
+        ttk.Label(t, textvariable=self.mfa_status_var, style="Small.TLabel").pack(
+            anchor="w", pady=(0, 9))
         ttk.Label(t, text="First test: run the hub server on your own PC and keep http://127.0.0.1:8751.\n"
                   "For friends over the Internet, deploy the hub with HTTPS and use its public URL.\n"
                   "Every player uses the same lobby server URL.", style="Small.TLabel", justify="left").pack(anchor="w", pady=10)
+
+    def build_social(self):
+        t = self.social_tab
+        self.section(t, "Social accounts & creator channels")
+        ttk.Label(t, text="Save your public social profile links here. These links are NOT verified or connected using OAuth.\n"
+                  "Only you can see them in this preview. Never enter passwords or stream keys.",
+                  style="Small.TLabel", justify="left").pack(anchor="w", pady=(0, 18))
+        row = ttk.Frame(t)
+        row.pack(fill="x", pady=4)
+        self.social_provider = tk.StringVar(value="twitch")
+        ttk.Label(row, text="Platform").pack(side="left", padx=(0, 10))
+        self.social_combo = ttk.Combobox(row, values=list(SOCIAL_PROVIDERS),
+                                          textvariable=self.social_provider, state="readonly", width=16)
+        self.social_combo.pack(side="left")
+        ttk.Label(row, text="Public profile URL").pack(side="left", padx=(15, 8))
+        self.social_url = tk.StringVar()
+        ttk.Entry(row, textvariable=self.social_url, width=62).pack(side="left", fill="x", expand=True)
+        buttons = ttk.Frame(t)
+        buttons.pack(anchor="w", pady=13)
+        ttk.Button(buttons, text="Save unverified link", command=self.save_social_link).pack(side="left", padx=(0, 8))
+        ttk.Button(buttons, text="Remove selected", command=self.remove_social_link).pack(side="left", padx=(0, 8))
+        ttk.Button(buttons, text="Open selected link", command=self.open_social_link).pack(side="left", padx=(0, 8))
+        ttk.Button(buttons, text="Refresh", command=self.load_social_links).pack(side="left")
+        self.social_tree = ttk.Treeview(t, columns=("platform", "url", "verification"),
+                                         show="headings", height=9)
+        for key, width in (("platform", 120), ("url", 610), ("verification", 150)):
+            self.social_tree.heading(key, text=key.title())
+            self.social_tree.column(key, width=width)
+        self.social_tree.pack(fill="both", expand=True, pady=10)
+        self.social_tree.bind("<<TreeviewSelect>>", self.selected_social_link)
+        ttk.Label(t, text="Full Twitch/YouTube/TikTok/Facebook authorization requires separate provider app registration,"
+                  " permission review and secure OAuth tokens; that is not implemented yet.",
+                  style="Small.TLabel", wraplength=920).pack(anchor="w")
+
+    def selected_social_link(self, event=None):
+        selection = self.social_tree.selection()
+        if selection:
+            row = self.social_tree.item(selection[0])["values"]
+            self.social_provider.set(str(row[0]).lower())
+            self.social_url.set(str(row[1]))
+
+    def load_social_links(self):
+        if not self.api.token:
+            return self.report_error("Log in to manage your social accounts")
+        def done(items):
+            for item in self.social_tree.get_children():
+                self.social_tree.delete(item)
+            for item in items:
+                self.social_tree.insert("", "end", iid=item["provider"],
+                    values=(item["provider"], item["url"], "Unverified / private"))
+        self.bg(lambda: self.api.call("GET", "/social-links"), done, "Loading social links...")
+
+    def save_social_link(self):
+        if not self.api.token:
+            return self.report_error("Log in first")
+        provider = self.social_provider.get()
+        try:
+            url = validate_social_url(provider, self.social_url.get())
+        except ValueError as exc:
+            return self.report_error(str(exc))
+        self.bg(lambda: self.api.call("PUT", "/social-links/" + provider, {"url": url}),
+                lambda _: self.load_social_links(), "Saving unverified social profile link...")
+
+    def remove_social_link(self):
+        if not self.api.token:
+            return self.report_error("Log in first")
+        provider = self.social_provider.get()
+        self.bg(lambda: self.api.call("DELETE", "/social-links/" + provider),
+                lambda _: self.load_social_links(), "Removing social profile link...")
+
+    def open_social_link(self):
+        try:
+            url = validate_social_url(self.social_provider.get(), self.social_url.get())
+        except ValueError as exc:
+            return self.report_error(str(exc))
+        webbrowser.open(url)
 
     def make_combos(self, parent, platform_var, emu_var, row):
         self.label(parent, "Console / platform", row)
@@ -328,6 +437,41 @@ class RetroRelayApp(tk.Tk):
                   "No ROMs, BIOS files or paid games are included in the project.", style="Small.TLabel", justify="left").pack(anchor="w", pady=15)
         self.load_profile()
 
+    def build_controllers(self):
+        t = self.controller_tab
+        self.section(t, "Detect and register your input devices")
+        ttk.Label(t, text="Connect a gamepad via USB/Bluetooth, then choose Scan. Standard keyboard and mouse\n"
+                  "can also be registered. Your device must be registered before joining new controller-required rooms.",
+                  style="Small.TLabel", justify="left").pack(anchor="w", pady=(0, 12))
+        detected_controls = ttk.Frame(t)
+        detected_controls.pack(fill="x", pady=5)
+        ttk.Button(detected_controls, text="Scan connected devices", command=self.scan_controllers).pack(side="left", padx=(0, 10))
+        ttk.Button(detected_controls, text="Register selected", style="Accent.TButton",
+                   command=self.register_controller).pack(side="left")
+        self.detected_tree = ttk.Treeview(t, columns=("kind", "name", "family"), show="headings", height=5)
+        for key, title, width in (("kind", "Input", 110), ("name", "Operating-system device name", 480),
+                                  ("family", "Detected family (unverified)", 240)):
+            self.detected_tree.heading(key, text=title)
+            self.detected_tree.column(key, width=width)
+        self.detected_tree.pack(fill="x", pady=(4, 15))
+        ttk.Label(t, text="Registered to your account", style="Header.TLabel").pack(anchor="w", pady=(0, 7))
+        ttk.Button(t, text="Refresh registered list", command=self.load_registered_controllers).pack(anchor="w", pady=5)
+        self.registered_tree = ttk.Treeview(t, columns=("kind", "name", "family"), show="headings", height=5)
+        for key, title, width in (("kind", "Input", 110), ("name", "Registered name", 480),
+                                  ("family", "Type (not authenticated)", 240)):
+            self.registered_tree.heading(key, text=title)
+            self.registered_tree.column(key, width=width)
+        self.registered_tree.pack(fill="x", pady=5)
+        ttk.Button(t, text="Remove selected registration", command=self.remove_controller).pack(anchor="w", pady=8)
+        ttk.Label(t, text="Use this input for game rooms:", style="Small.TLabel").pack(anchor="w", pady=(8, 3))
+        self.selected_controller_label = tk.StringVar()
+        self.registered_combo = ttk.Combobox(t, textvariable=self.selected_controller_label,
+                                            state="readonly", width=68)
+        self.registered_combo.pack(anchor="w")
+        ttk.Label(t, text="Important: device names and SDL GUIDs can be faked. Registration records your chosen\n"
+                  "input, but cannot verify official hardware, block macros, or police inputs inside emulators.",
+                  style="Small.TLabel", justify="left").pack(anchor="w", pady=(12, 0))
+
     def build_host(self):
         t = self.host_tab
         self.section(t, "Create a game waiting room")
@@ -343,6 +487,8 @@ class RetroRelayApp(tk.Tk):
         self.h_hint = tk.StringVar()
         self.h_notes = tk.StringVar()
         self.h_max = tk.IntVar(value=2)
+        self.h_cover_file = tk.StringVar()
+        self.h_cover_rights = tk.BooleanVar(value=False)
         self.label(form, "Game name", 2)
         self.entry(form, self.h_title, 2)
         self.label(form, "My matching game file / folder", 3)
@@ -360,7 +506,12 @@ class RetroRelayApp(tk.Tk):
         self.entry(form, self.h_notes, 6)
         self.label(form, "Maximum players", 7)
         ttk.Spinbox(form, from_=2, to=16, textvariable=self.h_max, width=6).grid(row=7,column=1,sticky="w",padx=7,pady=7)
-        ttk.Button(t, text="Create room + check my game", style="Accent.TButton", command=self.host_game).pack(anchor="w", pady=(20, 10))
+        self.label(form, "Optional lobby cover art", 8)
+        self.entry(form, self.h_cover_file, 8)
+        ttk.Button(form, text="Image", command=lambda: self.pick_art_file()).grid(row=8, column=2, padx=4)
+        ttk.Checkbutton(t, text="I made this artwork or have permission to publish it publicly",
+                        variable=self.h_cover_rights).pack(anchor="w", pady=(8, 0))
+        ttk.Button(t, text="Create room + check my game", style="Accent.TButton", command=self.host_game).pack(anchor="w", pady=(10, 10))
         self.host_note = tk.StringVar(value="For RetroArch, give friends your reachable IP or VPN IP (e.g. 10.0.0.5:55435).")
         ttk.Label(t, textvariable=self.host_note, style="Small.TLabel", wraplength=850).pack(anchor="w")
         self.h_mode.trace_add("write", lambda *_: self.host_note.set(MODES.get(self.h_mode.get(), "")))
@@ -379,19 +530,26 @@ class RetroRelayApp(tk.Tk):
             self.lobby_tree.column(col, width=width, minwidth=70)
         self.lobby_tree.pack(fill="both", expand=True, pady=(0, 9))
         self.lobby_tree.bind("<<TreeviewSelect>>", self.choose_lobby)
+        details = ttk.Frame(t)
+        details.pack(fill="x", pady=7)
+        self.cover_widget = ttk.Label(details, text="Select a lobby to preview its artwork",
+                                      width=36, anchor="center", background=PANEL)
+        self.cover_widget.pack(side="left", padx=(0, 15))
         self.lobby_desc = tk.StringVar(value="Select a lobby to read the requirements.")
-        ttk.Label(t, textvariable=self.lobby_desc, style="Small.TLabel", wraplength=1000).pack(anchor="w", pady=7)
+        ttk.Label(details, textvariable=self.lobby_desc, style="Small.TLabel",
+                  wraplength=730, justify="left").pack(side="left", fill="x", expand=True)
+
         join_form = ttk.Frame(t)
         join_form.pack(fill="x", pady=7)
         join_form.columnconfigure(1, weight=1)
         self.join_path = tk.StringVar()
-        self.label(join_form, "Your game file / folder", 0)
+        self.label(join_form, "Your game file / folder (not needed for Parsec)", 0)
         self.entry(join_form, self.join_path, 0)
         ttk.Button(join_form, text="File", command=lambda: self.pick_file(self.join_path)).grid(row=0,column=2,padx=4)
         ttk.Button(join_form, text="Folder", command=lambda: self.pick_folder(self.join_path)).grid(row=0,column=3,padx=4)
         row = ttk.Frame(t)
         row.pack(anchor="w")
-        ttk.Button(row, text="Verify game + join", style="Accent.TButton", command=self.join_game).pack(side="left", padx=(0, 10))
+        ttk.Button(row, text="Join selected lobby", style="Accent.TButton", command=self.join_game).pack(side="left", padx=(0, 10))
         ttk.Button(row, text="Set up selected emulator", command=self.setup_selected).pack(side="left")
 
     def build_room(self):
@@ -399,6 +557,9 @@ class RetroRelayApp(tk.Tk):
         self.section(t, "Your waiting room")
         self.room_heading = tk.StringVar(value="No active room. Host a game or join an existing lobby.")
         ttk.Label(t, textvariable=self.room_heading, wraplength=950).pack(anchor="w", pady=5)
+        self.room_cover_label = ttk.Label(t, text="No custom artwork selected", width=36,
+                                         anchor="center", background=PANEL)
+        self.room_cover_label.pack(anchor="w", pady=5)
         self.members_heading = tk.StringVar(value="Players: —")
         ttk.Label(t, textvariable=self.members_heading).pack(anchor="w", pady=5)
         self.connect_heading = tk.StringVar(value="Connection: —")
@@ -407,6 +568,7 @@ class RetroRelayApp(tk.Tk):
         tools.pack(anchor="w", pady=(10, 5))
         ttk.Button(tools, text="I'm ready / not ready", command=self.toggle_ready).pack(side="left", padx=(0, 8))
         ttk.Button(tools, text="Launch emulator / play", style="Accent.TButton", command=self.start_play).pack(side="left", padx=(0, 8))
+        ttk.Button(tools, text="Host: change artwork", command=self.update_room_art).pack(side="left", padx=(0, 8))
         ttk.Button(tools, text="Copy room ID", command=self.copy_room_id).pack(side="left", padx=(0, 8))
         ttk.Button(tools, text="Leave / close room", command=self.leave_game).pack(side="left")
         hint = ttk.Frame(t)
@@ -477,20 +639,115 @@ class RetroRelayApp(tk.Tk):
             self.current_room = None
         return self.api
 
+    def finish_login(self, api, res):
+        api.token = res["token"]
+        self.username = res["username"]
+        self.login_pass.set("")
+        self.status_var.set("Online • logged in as " + self.username)
+        self.notebook.select(self.discover_tab)
+        self.refresh_lobbies()
+        self.scan_controllers()
+        self.load_registered_controllers()
+        self.load_social_links()
+        self.refresh_mfa_status()
+
     def login(self):
         try:
             api = self.rebase_api()
         except ValueError as exc:
             return self.report_error(str(exc))
         def done(res):
-            api.token = res["token"]
-            self.username = res["username"]
-            self.status_var.set("Online • logged in as " + self.username)
-            self.notebook.select(self.discover_tab)
-            self.refresh_lobbies()
+            if res.get("mfa_required"):
+                code = simpledialog.askstring(
+                    "RetroRelay two-step verification",
+                    "Enter your six-digit phone authenticator code or one saved recovery code:",
+                    parent=self, show="*")
+                if not code:
+                    self.status_var.set("Two-step verification cancelled; not logged in")
+                    return
+                self.bg(lambda: api.call("POST", "/mfa/login",
+                                        {"challenge": res["challenge"], "code": code.strip()}),
+                        lambda verified: self.finish_login(api, verified),
+                        "Verifying phone authenticator...")
+            else:
+                self.finish_login(api, res)
         username, password = self.login_user.get(), self.login_pass.get()
         self.bg(lambda: api.call("POST", "/login", {"username": username,
                    "password": password}), done, "Signing in...")
+
+    def refresh_mfa_status(self):
+        if self.api.token:
+            def done(res):
+                if res["enabled"]:
+                    self.mfa_status_var.set("Phone two-step verification is ENABLED")
+                elif res.get("server_configured"):
+                    self.mfa_status_var.set("Phone two-step verification is available but OFF")
+                else:
+                    self.mfa_status_var.set("Phone two-step not configured on server; contact its operator")
+            self.bg(lambda: self.api.call("GET", "/mfa/status"), done,
+                    "Checking account two-step status...")
+
+    def enable_mfa(self):
+        if not self.api.token:
+            return self.report_error("Log in before enabling phone two-step verification")
+        password = simpledialog.askstring("Enable phone two-step",
+                                           "Re-enter your RetroRelay account password:",
+                                           show="*", parent=self)
+        if not password:
+            return
+        def show_setup(res):
+            messagebox.showinfo(
+                "Add RetroRelay to your authenticator",
+                "In your phone authenticator app, add an account using this setup key:\\n\\n"
+                + res["secret"]
+                + "\\n\\nKeep this key private. The setup expires after 15 minutes.\\n"
+                "Do not share it or place it in a screenshot.",
+                parent=self)
+            code = simpledialog.askstring(
+                "Confirm authenticator",
+                "Enter the current SIX-digit code from your authenticator to enable protection:",
+                parent=self, show="*")
+            if not code:
+                self.status_var.set("Setup not confirmed; two-step is still disabled")
+                return
+            def enrolled(result):
+                messagebox.showwarning(
+                    "Save your recovery codes NOW",
+                    "These eight one-use recovery codes will never be shown again.\\n"
+                    "Save them offline before closing this window.\\n\\n"
+                    + "\\n".join(result["recovery_codes"]),
+                    parent=self)
+                self.refresh_mfa_status()
+            self.bg(lambda: self.api.call("POST", "/mfa/confirm",
+                                           {"code": code.strip()}),
+                    enrolled, "Confirming phone two-step...")
+        self.bg(lambda: self.api.call("POST", "/mfa/setup",
+                                      {"password": password}), show_setup,
+                "Starting secure two-step setup...")
+
+    def disable_mfa(self):
+        if not self.api.token:
+            return self.report_error("Log in before changing two-step settings")
+        password = simpledialog.askstring("Disable phone two-step",
+                                           "Confirm your account password:",
+                                           parent=self, show="*")
+        if not password:
+            return
+        code = simpledialog.askstring(
+            "Disable phone two-step", "Enter a fresh phone code or single-use recovery code:",
+            parent=self, show="*")
+        if not code:
+            return
+        if not messagebox.askyesno("Disable phone two-step",
+                                   "Disable the extra login protection for this account?",
+                                   parent=self):
+            return
+        self.bg(lambda: self.api.call("POST", "/mfa/disable",
+                                      {"password": password, "code": code.strip()}),
+                lambda _: (self.refresh_mfa_status(),
+                           messagebox.showinfo("Two-step disabled", "Phone verification is now off.",
+                                               parent=self)),
+                "Updating account security...")
 
     def register(self):
         try:
@@ -522,8 +779,72 @@ class RetroRelayApp(tk.Tk):
         self.api.token = None
         self.username = None
         self.current_room = None
+        self.registered_devices = []
+        self.mfa_status_var.set("Phone two-step authentication: log in to check status")
+        for item in self.social_tree.get_children():
+            self.social_tree.delete(item)
+        self.controller_labels = {}
+        self.registered_combo["values"] = []
+        self.selected_controller_label.set("")
         self.status_var.set("Offline • log in to connect to the lobby server")
         self.notebook.select(self.account_tab)
+
+    def scan_controllers(self):
+        def done(devices):
+            self.detected_devices = devices
+            for item in self.detected_tree.get_children():
+                self.detected_tree.delete(item)
+            for i, device in enumerate(devices):
+                self.detected_tree.insert("", "end", iid=str(i),
+                                          values=(device["kind"], device["name"], device["family"]))
+            self.status_var.set(f"Found {len(devices)} input options (including keyboard/mouse)")
+        self.bg(detect_input_devices, done, "Scanning local input devices...")
+
+    def load_registered_controllers(self):
+        if not self.api.token:
+            return self.report_error("Log in to see account registrations")
+        def done(devices):
+            previous_id = self.selected_controller_id()
+            self.registered_devices = devices
+            self.controller_labels = {}
+            for item in self.registered_tree.get_children():
+                self.registered_tree.delete(item)
+            for device in devices:
+                self.registered_tree.insert("", "end", iid=device["id"],
+                    values=(device["kind"], device["name"], device["family"]))
+                label = f'{device["kind"]}: {device["name"]} [{device["id"][:8]}]'
+                self.controller_labels[label] = device["id"]
+            self.registered_combo["values"] = list(self.controller_labels)
+            selected_label = next((label for label, did in self.controller_labels.items()
+                                   if did == previous_id), None)
+            self.selected_controller_label.set(selected_label or next(iter(self.controller_labels), ""))
+        self.bg(lambda: self.api.call("GET", "/devices"), done, "Fetching registered devices...")
+
+    def selected_controller_id(self):
+        return self.controller_labels.get(self.selected_controller_label.get())
+
+    def register_controller(self):
+        if not self.api.token:
+            return self.report_error("Log in before registering controllers")
+        items = self.detected_tree.selection()
+        if not items:
+            return self.report_error("Scan and select a device first")
+        device = self.detected_devices[int(items[0])]
+        self.bg(lambda: self.api.call("POST", "/devices",
+                {"kind": device["kind"], "name": device["name"], "guid": device["guid"]}),
+                lambda _: self.load_registered_controllers(), "Registering your input choice...")
+
+    def remove_controller(self):
+        if not self.api.token:
+            return self.report_error("Log in first")
+        selection = self.registered_tree.selection()
+        if not selection:
+            return self.report_error("Select a registered device to remove")
+        if not messagebox.askyesno("Remove controller", "Remove this controller registration?"):
+            return
+        did = selection[0]
+        self.bg(lambda: self.api.call("DELETE", "/devices/" + did),
+                lambda _: self.load_registered_controllers(), "Removing device registration...")
 
     def load_profile(self):
         p = self.settings.get("profiles", {}).get(profile_key(self.sp_platform.get(), self.sp_emu.get()), {})
@@ -575,11 +896,21 @@ class RetroRelayApp(tk.Tk):
             raise ValueError("First configure " + emulator + " for " + platform + " under Emulator Setup")
         return profile
 
+    def pick_art_file(self):
+        path = filedialog.askopenfilename(title="Choose artwork you may publish",
+                                          filetypes=[("Images", "*.png *.jpg *.jpeg *.webp")])
+        if path:
+            self.h_cover_file.set(path)
+
     def host_game(self):
         if not self.api.token:
             return self.report_error("Log in first")
         if self.current_room:
             return self.report_error("Leave your current room before hosting another")
+        controller_id = self.selected_controller_id()
+        if not controller_id:
+            self.notebook.select(self.controller_tab)
+            return self.report_error("Register and select a controller/keyboard/mouse in the Controllers tab")
         platform = self.h_platform.get()
         emulator = self.h_emu.get()
         mode = self.h_mode.get()
@@ -601,15 +932,30 @@ class RetroRelayApp(tk.Tk):
             return self.report_error("Maximum players must be from 2 to 16")
 
         hint, notes = self.h_hint.get(), self.h_notes.get()
+        cover_path = self.h_cover_file.get().strip()
+        if cover_path and not self.h_cover_rights.get():
+            return self.report_error("Confirm you have permission to publish the selected artwork")
+        if cover_path and (not Path(cover_path).is_file() or Path(cover_path).stat().st_size > 800_000):
+            return self.report_error("Choose an image under 800 KB before creating a room")
         def operation():
             hashcode = game_fingerprint(path)
-            return self.api.call("POST", "/rooms", {
+            room = self.api.call("POST", "/rooms", {
                 "platform": platform, "emulator": emulator, "emulator_version": profile["version"],
                 "core_name": profile.get("core_name", ""), "core_version": profile.get("core_version", ""),
                 "game_title": title, "game_sha256": hashcode,
                 "mode": mode, "connection_hint": hint,
                 "notes": notes, "max_players": max_players,
+                "controller_required": True, "controller_id": controller_id,
             })
+            if cover_path:
+                try:
+                    self.api.call("PUT", "/rooms/" + room["id"] + "/artwork", {
+                        "image_base64": base64.b64encode(Path(cover_path).read_bytes()).decode("ascii"),
+                        "rights_confirmed": True,
+                    })
+                except (APIError, OSError, ValueError) as exc:
+                    room["art_warning"] = str(exc)
+            return room
         def done(result):
             self.current_room = {"id": result["id"], "is_host": True, "platform": platform,
                                  "emulator": emulator, "mode": mode, "connection_hint": hint}
@@ -618,7 +964,9 @@ class RetroRelayApp(tk.Tk):
             self.clear_chat()
             self.notebook.select(self.room_tab)
             self.refresh_room()
-            self.status_var.set("Room " + result["id"] + " created • waiting for friends")
+            self.status_var.set("Room " + result["id"] + " created • " +
+                                ("Cover upload failed: " + result['art_warning']
+                                 if result.get('art_warning') else "waiting for friends"))
         self.bg(operation, done, "Hashing every byte of your game, then creating lobby...")
 
     def refresh_lobbies(self, quiet=False):
@@ -639,6 +987,10 @@ class RetroRelayApp(tk.Tk):
                     r["mode"], str(r["players"]) + "/" + str(r["max_players"])))
             if selected and selected in self.rooms:
                 self.lobby_tree.selection_set(selected)
+                self.choose_lobby()
+            else:
+                self.cover_widget.configure(image="", text="Select a lobby to preview its artwork")
+                self.cover_photo = None
             if not quiet:
                 self.status_var.set(str(len(rows)) + " live lobby/lobbies found")
         def work():
@@ -670,13 +1022,72 @@ class RetroRelayApp(tk.Tk):
                 f"Required: {room['emulator']} {room['emulator_version']}"
                 + (f"  |  Core: {room['core_name']} {room['core_version']}" if room["core_name"] else "")
                 + f"\nMode: {MODES.get(room['mode'], room['mode'])}  •  {room['notes']}"
+                + ("\nThis room requires a registered input profile." if room.get("controller_required") else "")
+                + ("\nGuests only need Parsec and a controller; no local game copy required."
+                   if room["mode"] == "parsec" else "\nGuests must supply their own matching game copy.")
             )
+            self.preview_art(room_id, room.get("artwork", False))
+
+    def preview_art(self, room_id, has_artwork):
+        if not has_artwork:
+            self.cover_widget.configure(image="", text="No cover uploaded\n" +
+                                        self.rooms[room_id]["platform"])
+            self.cover_photo = None
+            return
+        if room_id in self.cover_cache:
+            self.apply_cover(room_id, self.cover_cache[room_id])
+            return
+        self.cover_widget.configure(image="", text="Loading game artwork...")
+        self.cover_photo = None
+        def fetch():
+            try:
+                data = self.api.image_bytes(room_id)
+                self.cover_cache[room_id] = data
+                self.after(0, lambda: self.apply_cover(room_id, data))
+            except Exception:
+                self.after(0, lambda: self.cover_widget.configure(text="Artwork unavailable"))
+        threading.Thread(target=fetch, daemon=True).start()
+
+    def apply_cover(self, room_id, data):
+        if self.selected_lobby_id() != room_id:
+            return
+        try:
+            self.cover_photo = tk.PhotoImage(data=base64.b64encode(data).decode("ascii"))
+            self.cover_widget.configure(image=self.cover_photo, text="")
+        except tk.TclError:
+            self.cover_widget.configure(image="", text="Artwork unavailable")
+
+    def preview_room_cover(self, room_id):
+        if room_id in self.cover_cache:
+            self.apply_room_cover(room_id, self.cover_cache[room_id])
+            return
+        def fetch():
+            try:
+                data = self.api.image_bytes(room_id)
+                self.cover_cache[room_id] = data
+                self.after(0, lambda: self.apply_room_cover(room_id, data))
+            except Exception:
+                self.after(0, lambda: self.room_cover_label.configure(text="Artwork unavailable"))
+        threading.Thread(target=fetch, daemon=True).start()
+
+    def apply_room_cover(self, room_id, data):
+        if not self.current_room or self.current_room['id'] != room_id:
+            return
+        try:
+            self.room_cover_photo = tk.PhotoImage(data=base64.b64encode(data).decode('ascii'))
+            self.room_cover_label.configure(image=self.room_cover_photo, text="")
+        except tk.TclError:
+            self.room_cover_label.configure(image="", text="Artwork unavailable")
 
     def setup_selected(self):
         room_id = self.selected_lobby_id()
         if not room_id or room_id not in self.rooms:
             return self.report_error("Select a room first")
         room = self.rooms[room_id]
+        controller_id = self.selected_controller_id()
+        if room.get("controller_required") and not controller_id:
+            self.notebook.select(self.controller_tab)
+            return self.report_error("Select a registered controller/keyboard/mouse before joining")
         self.sp_platform.set(room["platform"])
         self.sp_emu.set(room["emulator"])
         self.notebook.select(self.setup_tab)
@@ -690,24 +1101,34 @@ class RetroRelayApp(tk.Tk):
         if not room_id or room_id not in self.rooms:
             return self.report_error("Select a room first")
         room = self.rooms[room_id]
-        try:
-            profile = self.selected_profile(room["platform"], room["emulator"])
-        except ValueError as exc:
-            return self.report_error(str(exc))
-        for field, key in [("version", "emulator_version"), ("core_name", "core_name"),
-                           ("core_version", "core_version")]:
-            if profile.get(field, "") != room[key]:
-                return self.report_error(f"Emulator profile mismatch ({field}). Host requires {room[key]!r}.")
-        path = self.join_path.get().strip()
-        if Path(path).suffix.lower() in (".cue", ".m3u"):
-            return self.report_error("Select the containing FOLDER for CUE/BIN or multi-disc games")
+        controller_id = self.selected_controller_id()
+        if room.get("controller_required") and not controller_id:
+            self.notebook.select(self.controller_tab)
+            return self.report_error("Register and select an input device before joining")
+        is_remote_guest = room["mode"] == "parsec"
+        profile = {}
+        path = ""
+        if not is_remote_guest:
+            try:
+                profile = self.selected_profile(room["platform"], room["emulator"])
+            except ValueError as exc:
+                return self.report_error(str(exc))
+            for field, key in [("version", "emulator_version"), ("core_name", "core_name"),
+                               ("core_version", "core_version")]:
+                if profile.get(field, "") != room[key]:
+                    return self.report_error(f"Emulator profile mismatch ({field}). Host requires {room[key]!r}.")
+            path = self.join_path.get().strip()
+            if Path(path).suffix.lower() in (".cue", ".m3u"):
+                return self.report_error("Select the containing FOLDER for CUE/BIN or multi-disc games")
 
         def operation():
-            digest = game_fingerprint(path)
+            digest = "" if is_remote_guest else game_fingerprint(path)
             self.api.call("POST", "/rooms/" + room_id + "/join", {
-                "emulator": room["emulator"], "emulator_version": profile["version"],
+                "emulator": "" if is_remote_guest else room["emulator"],
+                "emulator_version": "" if is_remote_guest else profile["version"],
                 "core_name": profile.get("core_name", ""), "core_version": profile.get("core_version", ""),
                 "game_sha256": digest,
+                "controller_id": controller_id,
             })
             return room_id
         def done(result):
@@ -717,8 +1138,10 @@ class RetroRelayApp(tk.Tk):
             self.clear_chat()
             self.notebook.select(self.room_tab)
             self.refresh_room()
-            self.status_var.set("Joined room " + result + " • game hash and versions matched")
-        self.bg(operation, done, "Verifying full game SHA-256 and joining...")
+            self.status_var.set("Joined " + result + (" • connect using Parsec to play"
+                if is_remote_guest else " • game hash and versions matched"))
+        self.bg(operation, done, "Joining controller-only room..." if is_remote_guest
+                else "Verifying full game SHA-256 and joining...")
 
     def clear_chat(self):
         self.chat_view.configure(state="normal")
@@ -751,8 +1174,14 @@ class RetroRelayApp(tk.Tk):
         room, messages = result
         self.current_room = room
         self.room_heading.set(f"{room['game_title']}  •  {room['platform']}  •  {room['emulator']} {room['emulator_version']}  •  Room {room_id}")
+        if room.get("artwork"):
+            self.preview_room_cover(room_id)
+        else:
+            self.room_cover_label.configure(image="", text=f"{room['platform']} • {room['game_title'][:35]}")
         self.members_heading.set("Players: " + "    |    ".join(
-            m["username"] + (" ✓ READY" if m["ready"] else " • waiting") for m in room["members"]))
+            m["username"] + (" ✓ READY" if m["ready"] else " • waiting") +
+            (" [" + m["controller"][:28] + "]" if m.get("controller") else "")
+            for m in room["members"]))
         self.current_ready = next((m["ready"] for m in room["members"] if m["username"] == self.username), False)
         self.connect_heading.set("Method: " + MODES.get(room["mode"], room["mode"]) +
                                  "\nConnect info (room members only): " + (room["connection_hint"] or "Host has not posted details yet"))
@@ -792,6 +1221,29 @@ class RetroRelayApp(tk.Tk):
             return
         self.chat_entry.set("")
         self.post_room("/chat", {"message": message}, "Message sent")
+
+    def update_room_art(self):
+        if not self.current_room or not self.current_room.get('is_host'):
+            return self.report_error("Only the host can change lobby artwork")
+        if not messagebox.askyesno("Artwork rights", "Do you own this image or have explicit permission to publish it publicly?"):
+            return
+        path = filedialog.askopenfilename(title="Select artwork you may publish",
+                                           filetypes=[("Artwork", "*.png *.jpg *.jpeg *.webp")])
+        if not path:
+            return
+        if Path(path).stat().st_size > 800_000:
+            return self.report_error("Artwork must be under 800 KB")
+        room_id = self.current_room['id']
+        def operation():
+            encoded = base64.b64encode(Path(path).read_bytes()).decode('ascii')
+            self.api.call('PUT', f'/rooms/{room_id}/artwork',
+                          {'image_base64': encoded, 'rights_confirmed': True})
+            return True
+        def done(_):
+            self.cover_cache.pop(room_id, None)
+            self.refresh_room()
+            self.status_var.set("Lobby artwork updated")
+        self.bg(operation, done, "Uploading artwork...")
 
     def update_connection(self):
         if not self.current_room:

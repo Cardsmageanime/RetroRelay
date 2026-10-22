@@ -1,0 +1,16 @@
+name: October v0.2 release held pending security review
+
+# Release creation deliberately disabled until v0.2.1 security fixes,
+# independent review, real-world tests and explicit owner approval.
+# A future release PR may restore a manually approved publish job.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release-held:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Release held. No ZIP or GitHub release is created."

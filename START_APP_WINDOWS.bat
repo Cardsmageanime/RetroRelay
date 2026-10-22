@@ -7,5 +7,7 @@ if not exist .venv\Scripts\python.exe (
 )
 .venv\Scripts\python.exe -m pip install -r requirements.txt
 if errorlevel 1 (pause & exit /b 1)
+.venv\Scripts\python.exe -m pip install -r requirements-client.txt
+if errorlevel 1 echo Optional gamepad scan unavailable: install pygame to enable it.
 .venv\Scripts\python.exe client.py
 if errorlevel 1 pause

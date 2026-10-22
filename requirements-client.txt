@@ -1,0 +1,3 @@
+# Optional SDL2-based gamepad discovery for the desktop application.
+pygame>=2.6,<3
+# Pillow is used on the hub server to validate and resize artwork (not needed for viewing with Tk).

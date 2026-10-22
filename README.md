@@ -1,4 +1,4 @@
-# RetroRelay — Classic Multiplayer Hub (Starter v0.1)
+# RetroRelay — Classic Multiplayer Hub (Controller Preview v0.2 candidate)
 
 > **Early preview / source code only:** this is not a standalone installer or a ready-to-run public multiplayer network. Do not expose the account server to open registration until security protections are added. See [Security](SECURITY.md) and [Release Notes](RELEASE_NOTES.md).
 
@@ -25,9 +25,10 @@
 2. Double-click **`START_HUB_WINDOWS.bat`** on the PC that will host the *lobby server*. It installs dependencies in a local virtual environment automatically. Keep the terminal running.
 3. Double-click **`START_APP_WINDOWS.bat`**. On the `Account` tab, keep the default server URL `http://127.0.0.1:8751`. Create an account; then log in.
 4. On `Emulator Setup`, select a console and emulator. Browse to the emulator executable, enter its **exact installed version**, and save. RetroArch users also enter the **core name, core version and installed core `.dll` file**.
-5. On `Host Game`, choose game, matching file or folder, and multiplayer method. Click **Create room + check my game**. The app calculates a full SHA-256 fingerprint. For RetroArch the host should provide an address reachable by other players, typically `your-public-IP:55435` or a Hamachi VPN address; it is for the emulator netplay connection, not the lobby server.
-6. On the other PC, install the app and emulator, set its **lobby server URL** to your shared HTTPS server URL (see below), register a different account and enter their own emulator profile. Go to `Find Games`, select your lobby and choose their local copy of the *exact same game*. Click **Verify game + join**.
-7. Use `Waiting Room` to chat, mark ready and press **Launch emulator / play**. RetroArch classic netplay starts via command-line; Dolphin, Parsec, and game-network modes provide guided/manual setup.
+5. On `Controllers`, connect your gamepad via USB/Bluetooth and select **Scan connected devices**, or choose the keyboard/mouse entries. Select a device and click **Register selected**. Choose your registered input from the selector at the bottom. Gamepad scanning uses the optional `pygame`/SDL2 package, installed by the startup script when supported.
+6. On `Host Game`, choose game, matching file or folder, and multiplayer method. Click **Create room + check my game**. New rooms require a registered input profile. The app calculates a full SHA-256 fingerprint. For RetroArch the host should provide an address reachable by other players, typically `your-public-IP:55435` or a Hamachi VPN address; it is for the emulator netplay connection, not the lobby server.
+7. On the other PC, install the app and emulator, set its **lobby server URL** to your shared HTTPS server URL (see below), register a different account and register an input device. Go to `Find Games`, select your lobby and choose their local copy of the *exact same game*. Click **Verify game + join**.
+8. Use `Waiting Room` to see other players' declared input devices, chat, mark ready and press **Launch emulator / play**. RetroArch classic netplay starts via command-line; Dolphin, Parsec, and game-network modes provide guided/manual setup.
 
 ## First play session — Linux / Bazzite
 
@@ -43,6 +44,17 @@ chmod +x START_HUB_LINUX.sh START_APP_LINUX.sh
 ```
 
 On both operating systems, only *the lobby host* needs to run the hub server. Other players run only the desktop client and point it at the same server URL.
+
+## Controller registration and fair-play policy (October candidate)
+
+- **Device discovery:** Controller tab uses `pygame` (SDL2) to list plugged-in/paired gamepads by the operating system's name and SDL GUID. Supports common Xbox, PlayStation DualShock 4/DualSense, Nintendo Switch controllers and generic USB/Bluetooth gamepads when the OS/SDL detects them. An emulator still needs its own controller mapping; RetroRelay does not configure or route game inputs.
+- **Keyboard and mouse:** selectable PC input options, not proof a particular physical keyboard or mouse is attached. If pygame cannot be installed, these options remain available.
+- **Account registration:** players register one or more devices, and select which to use. Registrations are stored server-side per account, not shared globally. A maximum of 16 inputs can be registered per account. The account holder can remove them.
+- **Lobby requirement:** new rooms created with this client require a registered input for hosting, joining and marking ready. Existing v0.1 rooms are unchanged to preserve compatibility. Waiting-room members can see the declared type/name.
+- **NOT an anti-cheat guarantee:** SDL names and GUIDs can be spoofed, and remote controllers, remapping programs, macros, adapters and emulator-specific inputs are outside the hub's control. Labels such as *PlayStation-style* or *Xbox-style* are heuristic **not official-controller authenticity checks**. Generic and accessibility controllers are allowed; the software does not ban players based on input type.
+- **Privacy:** no HID serial number, raw keyboard/mouse input, button press logs, hardware IDs beyond optional SDL GUID, or controller telemetry are collected. Keep operating-system device details private except the chosen label shown to room members.
+
+Gamepad scanning installation by itself is not proof the game/emulator supports a particular controller. If no gamepad is found, make sure it is paired in your operating system first.
 
 ## Share your lobby server with friends on the Internet
 
@@ -139,3 +151,33 @@ python -m pytest -q
 - [GoTo Hamachi support](https://support.goto.com/hamachi) — virtual private networking.
 
 **Legal:** use your own authorized game backups, homebrew and emulator/BIOS files. This project does not offer ROM downloads or bypass game DRM or paid network services.
+
+## Artwork and controller-only guest play (October preview)
+
+Lobby hosts may upload **original or licensed** PNG/JPEG/WebP art (<800 KB) and confirm that they are permitted to publish it. Other signed-in users see a thumbnail while browsing and in the waiting room. Game titles support Unicode across platforms and languages; unillustrated games show text fallback. The app does not include an unlicensed worldwide cover-art library. See `ARTWORK_AND_PLAY_MODES.md`.
+
+For host-only-streamed games, select **Parsec shared-controller remote play**. The host needs the game and Parsec configured; joining guests do not need their own ROM or the emulator. They do still register their input devices and connect via Parsec (a separate service), with the host approving access. For native netplay, each player still needs a matching game copy/version. **RetroRelay does not host or distribute ROMs or commercial game artwork.**
+
+## October v0.2 preview: Social Accounts (unverified profile links)
+
+The desktop application now includes **7 • Social Accounts** where signed-in users can save, open, replace, or delete private links to their Twitch, YouTube, TikTok, Facebook, and Instagram profiles. Each URL is checked against an exact provider HTTPS domain and limited profile URL pattern. The server stores links per RetroRelay account; links are **private to the owner** and **unverified**. Users cannot see other users' links, and this feature does not log into social platforms or transmit passwords or stream keys.
+
+**Future OAuth authorization is separate:** actual provider account linking, streaming/chat permissions, automatic live status, and cross-posting are **not implemented**. They require developer applications, official OAuth authorization, registered callback URLs, consent/privacy policies, and sometimes provider approval. See GitHub Issue #6. Twitch streaming and dual chat remains a separately scoped January update (Issue #3).
+
+## October v0.2 preview: optional phone-authenticator MFA (experimental)
+
+**Status:** implementation under review for October 20, 2026 (Issue #9); do **not** use it as the sole protection for a public production server until security review and deployment testing.
+
+RetroRelay users can choose **Enable phone 2-step** from the Account tab after login. Re-enter the account password, then add the displayed **setup secret** manually to a phone authenticator that supports six-digit, 30-second TOTP (such as Google Authenticator or Microsoft Authenticator). Enter the current phone code to confirm. Save the **eight single-use recovery codes offline** immediately; they will not be displayed again. Future password logins will then require a phone code or an unused recovery code before RetroRelay gives out a normal session.
+
+**Server operator setup (required for account MFA):**
+
+1. Install the server's requirements, including Python `cryptography`.
+2. Generate a persistent encryption key privately: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
+3. For Docker, put `RETRORELAY_MFA_KEY=<generated-key>` in the **private** `.env` file used by Compose; see `.env.example`. For a native process, provide the same environment variable to the hub service.
+4. Keep the key **outside GitHub** and back it up securely. Never regenerate it casually. Losing/rotating it without a migration will prevent enrolled accounts from verifying their codes; the server **fails closed**, not by bypassing MFA.
+5. Use HTTPS for any remotely accessed accounts. Never post the setup key, recovery codes, screenshots of secrets or server environment in an issue.
+
+A **password + PIN** is not genuine MFA because both are information you know. A separate device-local PIN may be considered for convenience, but must never replace a configured phone authenticator at server login. SMS text codes are **not implemented**. Rate limits and OTP single-use checks lower risk, but cannot guarantee nobody's account will be compromised. A public service still requires comprehensive abuse protection, backups, audit, recovery support and independent security review.
+
+Related: [October Account Security Issue #9](https://github.com/Cardsmageanime/RetroRelay/issues/9).
