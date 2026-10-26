@@ -1,3 +1,21 @@
+# Nexus Relay — Retro Relay Online module
+
+**This codebase is now a component of [Nexus Relay's unified GitHub home page](https://github.com/Cardsmageanime/Arcade-Nexus).**
+
+Nexus Relay combines the Arcade World, Gaming History Museum, RetroRelay PC multiplayer client/server, planned licensed Store, and ARM external-boot Systems Edition into one product vision. This repository retains the **existing RetroRelay implementation and history** during integration; no files have been erased or falsely represented as merged.
+
+- [Unified product home](https://github.com/Cardsmageanime/Arcade-Nexus)
+- [ARM systems foundation](https://github.com/Cardsmageanime/RetroVerse/tree/milestone/arm64-kernel-build-20261023)
+- **Original artwork only**; no third-party game art or assets without explicit permission.
+- **Phases 1–5 only**; Phase 6 is reserved for joint planning.
+- Existing networking service is a starter, not a hardened or publicly hosted Nexus Relay network.
+
+## Historical RetroRelay technical instructions
+
+The original README is retained below for compatibility and learning.
+
+---
+
 # RetroRelay — Classic Multiplayer Hub (Starter v0.1)
 
 > **Early preview / source code only:** this is not a standalone installer or a ready-to-run public multiplayer network. Do not expose the account server to open registration until security protections are added. See [Security](SECURITY.md) and [Release Notes](RELEASE_NOTES.md).
