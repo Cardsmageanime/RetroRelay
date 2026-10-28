@@ -12,9 +12,11 @@ from pathlib import Path
 from contextlib import contextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, field_validator
 
 from catalog import PLATFORMS, MODES, compatible_mode
+from landing import landing_page
 
 USERNAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{2,23}$")
 HEX_RE = re.compile(r"^[a-f0-9]{64}$")
@@ -173,6 +175,11 @@ def create_app(db_path: str | None = None) -> FastAPI:
             "notes": room["notes"], "max_players": room["max_players"],
             "players": count, "created_at": room["created_at"],
         }
+
+    @app.get("/", response_class=HTMLResponse)
+    def index():
+        """Read-only status page so the hub is visible in a browser."""
+        return landing_page(app.state.db_path)
 
     @app.get("/health")
     def health():

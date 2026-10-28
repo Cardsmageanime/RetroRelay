@@ -1,0 +1,62 @@
+# RetroRelay dev environment for the Base44 sandbox.
+#
+# Runs the FastAPI hub from the working tree (bind-mounted) with live reload, so
+# source edits show up in the preview without an image rebuild.
+#
+# No third-party credentials are required: the hub stores accounts, rooms and
+# chat locally in SQLite (named volume `hub_data`, outside the repo).
+#
+# The RetroRelay desktop client (client.py) is a Tkinter GUI for the player's own
+# Windows/Linux PC and is intentionally not part of this stack.
+#
+# Start:  docker compose -f docker-compose.base44.yml up -d --build
+# Logs:   docker compose -f docker-compose.base44.yml logs -f hub
+# Tests:  docker compose -f docker-compose.base44.yml exec hub python -m pytest -q
+
+services:
+  hub:
+    build:
+      context: .
+      dockerfile: Dockerfile.base44
+    restart: on-failure
+    working_dir: /app
+    # --reload = live reload from the bind mount. uvicorn falls back to its
+    # polling reloader (StatReload) here, which sees edits made on the sandbox
+    # side of the bind mount.
+    command:
+      - python
+      - -m
+      - uvicorn
+      - server:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8751"
+      - --reload
+    environment:
+      RETRORELAY_DB: /appdata/lobbies.sqlite3
+    volumes:
+      - .:/app
+      - hub_data:/appdata
+    ports:
+      # Host port 3000 is the preview entry point; the hub listens on 8751.
+      - "3000:8751"
+    labels:
+      base44.project: RetroRelay Hub
+      base44.kind: api
+      base44.port: "3000"
+      base44.docs: /docs
+    healthcheck:
+      # Uses the hub's existing read-only /health endpoint (urllib ships with python).
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8751/health', timeout=3).status == 200 else 1)
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  hub_data:
