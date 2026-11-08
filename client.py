@@ -166,9 +166,9 @@ class API:
 class RetroRelayApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("RetroRelay • Classic Multiplayer Hub")
-        self.geometry("1120x780")
-        self.minsize(900, 660)
+        self.title("RetroRelay | Classic Multiplayer Hub")
+        self.geometry("1380x850")
+        self.minsize(1180, 780)
         self.configure(bg=BG)
         self.settings = read_settings()
         self.api = API(self.settings.get("server") or DEFAULT_CONFIG["server"])
@@ -179,7 +179,7 @@ class RetroRelayApp(tk.Tk):
         self.current_ready = False
         self.room_polling = False
         self.lobby_polling = False
-        self.status_var = tk.StringVar(value="Offline • log in to connect to the lobby server")
+        self.status_var = tk.StringVar(value="Offline | log in to connect to the lobby server")
         self.setup_style()
         self.build_ui()
         self.after(5000, self.poll)
@@ -192,11 +192,18 @@ class RetroRelayApp(tk.Tk):
         style.configure("TLabel", background=BG, foreground=FG, font=("Arial", 10))
         style.configure("Header.TLabel", background=BG, foreground=FG, font=("Arial", 18, "bold"))
         style.configure("Small.TLabel", background=BG, foreground=SUBTLE, font=("Arial", 10))
-        style.configure("TButton", font=("Arial", 10), padding=(12, 7))
+        style.configure("TButton", font=("Arial", 10), padding=(12, 7), background="#263c54",
+                        foreground=FG, borderwidth=0, relief="flat", bordercolor="#263c54",
+                        lightcolor="#263c54", darkcolor="#263c54")
+        style.map("TButton", background=[("active", "#34536e")], foreground=[("disabled", SUBTLE)])
         style.configure("Accent.TButton", background="#1da994", foreground="#ffffff", font=("Arial", 10, "bold"))
         style.map("Accent.TButton", background=[("active", "#188777")])
-        style.configure("TEntry", padding=5)
-        style.configure("TCombobox", padding=5)
+        style.configure("TEntry", padding=7, fieldbackground=PANEL, foreground=FG,
+                        insertcolor=FG, bordercolor="#34536e", lightcolor=PANEL, darkcolor=PANEL)
+        style.configure("TCombobox", padding=7, fieldbackground=PANEL, background="#263c54", arrowcolor=FG)
+        style.map("TCombobox", fieldbackground=[("readonly", PANEL)], foreground=[("readonly", FG)])
+        self.option_add("*TCombobox*Listbox.background", PANEL)
+        self.option_add("*TCombobox*Listbox.foreground", FG)
         style.configure("TNotebook", background=BG, borderwidth=0)
         style.configure("TNotebook.Tab", padding=(20, 11), background=PANEL, foreground=FG)
         style.map("TNotebook.Tab", background=[("selected", "#28415a")], foreground=[("selected", "white")])
@@ -204,6 +211,18 @@ class RetroRelayApp(tk.Tk):
         style.configure("Treeview.Heading", background="#263c54", foreground=FG, font=("Arial", 10, "bold"))
         style.map("Treeview", background=[("selected", "#275867")], foreground=[("selected", "white")])
         style.configure("TSpinbox", padding=5)
+        style.layout("Sidebar.TNotebook.Tab", [])
+        style.configure("Sidebar.TNotebook", background=BG, borderwidth=0)
+        style.layout("Sidebar.TNotebook", [("Notebook.client", {"sticky": "nswe"})])
+        style.configure("Nav.TButton", anchor="w", padding=(18, 16), background=PANEL, foreground=FG)
+        style.map("Nav.TButton", background=[("pressed", "#275867"), ("active", "#263c54")])
+        style.configure("Selected.Nav.TButton", anchor="w", padding=(18, 16), background="#275867", foreground=ACCENT)
+        style.configure("Title.TLabel", background=BG, foreground=FG, font=("Arial", 25, "bold"))
+        style.configure("Card.TLabel", background=PANEL, foreground=FG, font=("Arial", 11))
+        style.configure("CardTitle.TLabel", background=PANEL, foreground=FG, font=("Arial", 19, "bold"))
+        style.configure("CardMuted.TLabel", background=PANEL, foreground=SUBTLE, font=("Arial", 10))
+        style.configure("Treeview", rowheight=68, font=("Arial", 11))
+        style.configure("Treeview.Heading", padding=(8, 12))
 
     def label(self, parent, text, r, c=0, sticky="w", width=None):
         lbl = ttk.Label(parent, text=text)
@@ -219,33 +238,77 @@ class RetroRelayApp(tk.Tk):
         ttk.Label(parent, text=text, style="Header.TLabel").pack(anchor="w", pady=(8, 14))
 
     def build_ui(self):
-        hero = ttk.Frame(self)
-        hero.pack(fill="x", padx=20, pady=(15, 10))
-        ttk.Label(hero, text="RETRORELAY", style="Header.TLabel").pack(side="left")
-        ttk.Label(hero, text="  Classic multiplayer • your games, your emulators, your lobby", style="Small.TLabel").pack(side="left")
-        self.notebook = ttk.Notebook(self)
-        self.notebook.pack(fill="both", expand=True, padx=20, pady=10)
-        self.account_tab = ttk.Frame(self.notebook, padding=18)
-        self.setup_tab = ttk.Frame(self.notebook, padding=18)
-        self.host_tab = ttk.Frame(self.notebook, padding=18)
-        self.discover_tab = ttk.Frame(self.notebook, padding=18)
-        self.room_tab = ttk.Frame(self.notebook, padding=18)
-        for name, tab in [
-            ("1 • Account", self.account_tab), ("2 • Emulator Setup", self.setup_tab),
-            ("3 • Host Game", self.host_tab), ("4 • Find Games", self.discover_tab),
-            ("5 • Waiting Room", self.room_tab),
+        header = ttk.Frame(self, padding=(24, 20))
+        header.pack(fill="x")
+        brand = ttk.Frame(header)
+        brand.pack(side="left")
+        ttk.Label(brand, text="RETRORELAY", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(brand, text="Classic Multiplayer Hub", style="Small.TLabel").pack(anchor="w")
+        self.identity_var = tk.StringVar(value="Not signed in")
+        ttk.Label(header, textvariable=self.identity_var).pack(side="right", padx=12)
+        ttk.Separator(self).pack(fill="x")
+        footer = ttk.Frame(self, padding=(24, 10))
+        footer.pack(side="bottom", fill="x")
+        ttk.Label(footer, textvariable=self.status_var, style="Small.TLabel").pack(side="left")
+        shell = ttk.Frame(self)
+        shell.pack(fill="both", expand=True)
+        sidebar = ttk.Frame(shell, style="Panel.TFrame", width=224, padding=(10, 24))
+        sidebar.pack(side="left", fill="y")
+        sidebar.pack_propagate(False)
+        self.notebook = ttk.Notebook(shell, style="Sidebar.TNotebook", takefocus=False)
+        self.notebook.pack(side="left", fill="both", expand=True, padx=16, pady=16)
+        self.account_tab = ttk.Frame(self.notebook, padding=12)
+        self.setup_tab = ttk.Frame(self.notebook, padding=12)
+        self.host_tab = ttk.Frame(self.notebook, padding=12)
+        self.discover_tab = ttk.Frame(self.notebook, padding=12)
+        self.room_tab = ttk.Frame(self.notebook, padding=12)
+        self.library_tab = ttk.Frame(self.notebook, padding=12)
+        self.nav_buttons = {}
+        for name, page in [
+            ("Find Games", self.discover_tab), ("Host Game", self.host_tab),
+            ("Waiting Room", self.room_tab), ("Emulator Setup", self.setup_tab),
+            ("Library & Achievements", self.library_tab), ("Account & Security", self.account_tab),
         ]:
-            self.notebook.add(tab, text=name)
+            self.notebook.add(page, text=name)
+            button = ttk.Button(sidebar, text=name, style="Nav.TButton",
+                                command=lambda target=page: self.show_page(target))
+            button.pack(fill="x", pady=5)
+            self.nav_buttons[page] = button
+        self.notebook.bind("<<NotebookTabChanged>>", self.sync_navigation)
         self.build_account()
         self.build_setup()
         self.build_host()
         self.build_discover()
         self.build_room()
-        ttk.Label(self, textvariable=self.status_var, style="Small.TLabel").pack(anchor="w", padx=23, pady=(0, 14))
+        self.build_library()
+        self.show_page(self.discover_tab)
+
+    def show_page(self, page):
+        self.notebook.select(page)
+        self.sync_navigation()
+
+    def sync_navigation(self, _event=None):
+        for page, button in self.nav_buttons.items():
+            button.configure(style="Selected.Nav.TButton" if self.notebook.select() == str(page) else "Nav.TButton")
+
+    def update_identity(self):
+        self.identity_var.set(self.username if self.username and self.api.token else "Not signed in")
+
+    def build_library(self):
+        self.section(self.library_tab, "Library & Achievements")
+        ttk.Label(self.library_tab, text="Planned for December 2026 | provider connections are not implemented yet.",
+                  style="Small.TLabel", wraplength=780).pack(anchor="w", pady=(0, 24))
+        for provider in ("Steam", "GOG GALAXY", "Epic Games", "RetroAchievements"):
+            card = ttk.Frame(self.library_tab, style="Panel.TFrame", padding=18)
+            card.pack(fill="x", pady=6)
+            ttk.Label(card, text=provider, style="Card.TLabel").pack(side="left")
+            ttk.Label(card, text="Planned | not connected", style="CardMuted.TLabel").pack(side="right")
 
     def build_account(self):
         t = self.account_tab
-        self.section(t, "Connect to your community")
+        self.section(t, "Account & Security")
+        ttk.Label(t, text="Passwords are not saved by this desktop client. Public servers require HTTPS.\n"
+                  "Phone authenticator setup is not available in this build.", style="Small.TLabel").pack(anchor="w", pady=(0, 16))
         ttk.Label(t, text="Your account lives on the RetroRelay lobby server. No game files are uploaded.",
                   style="Small.TLabel").pack(anchor="w", pady=(0, 16))
         form = ttk.Frame(t)
@@ -367,41 +430,113 @@ class RetroRelayApp(tk.Tk):
 
     def build_discover(self):
         t = self.discover_tab
-        self.section(t, "Find people playing your games")
-        ttk.Button(t, text="Refresh available rooms", command=self.refresh_lobbies).pack(anchor="w", pady=(0, 10))
-        columns = ("game", "console", "emulator", "mode", "players")
-        self.lobby_tree = ttk.Treeview(t, columns=columns, show="headings", height=11)
-        for col, header, width in [
-            ("game", "Game", 240), ("console", "Platform", 170),
-            ("emulator", "Emulator / version", 190), ("mode", "Play method", 140), ("players", "Players", 75),
-        ]:
-            self.lobby_tree.heading(col, text=header)
-            self.lobby_tree.column(col, width=width, minwidth=70)
-        self.lobby_tree.pack(fill="both", expand=True, pady=(0, 9))
+        ttk.Label(t, text="Find Games", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(t, text="Find a compatible lobby and play together.", style="Small.TLabel").pack(anchor="w", pady=(6, 20))
+        toolbar = ttk.Frame(t)
+        toolbar.pack(fill="x", pady=(0, 16))
+        toolbar.columnconfigure(0, weight=1)
+        self.search_var = tk.StringVar()
+        self.platform_filter = tk.StringVar(value="All platforms")
+        self.mode_filter = tk.StringVar(value="All play methods")
+        search = ttk.Entry(toolbar, textvariable=self.search_var, width=20)
+        search.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        # Visible label remains available to keyboard and screen-reader users.
+        ttk.Label(toolbar, text="Search games or hosts", style="Small.TLabel").grid(row=1, column=0, sticky="w", pady=4)
+        ttk.Combobox(toolbar, textvariable=self.platform_filter, values=["All platforms", *PLATFORMS],
+                     state="readonly", width=19).grid(row=0, column=1, padx=4)
+        ttk.Combobox(toolbar, textvariable=self.mode_filter, values=["All play methods", *MODES],
+                     state="readonly", width=16).grid(row=0, column=2, padx=4)
+        ttk.Button(toolbar, text="Refresh", style="Accent.TButton", command=self.refresh_lobbies).grid(row=0, column=3, padx=(8, 0))
+        body = ttk.Frame(t)
+        body.pack(fill="both", expand=True)
+        body.columnconfigure(0, weight=1)
+        body.columnconfigure(1, minsize=290)
+        body.rowconfigure(0, weight=1)
+        listing = ttk.Frame(body)
+        listing.grid(row=0, column=0, sticky="nsew", padx=(0, 16))
+        listing.rowconfigure(0, weight=1)
+        listing.columnconfigure(0, weight=1)
+        columns = ("game", "console", "mode", "players")
+        self.lobby_tree = ttk.Treeview(listing, columns=columns, show="headings", selectmode="browse", height=7)
+        for col, label, width in [("game", "GAME / ROOM", 200), ("console", "PLATFORM", 140),
+                                  ("mode", "METHOD", 110), ("players", "PLAYERS", 85)]:
+            self.lobby_tree.heading(col, text=label)
+            self.lobby_tree.column(col, width=width, minwidth=60, stretch=col in ("game", "console"))
+        self.lobby_tree.tag_configure("alternate", background="#1b2b3d")
+        self.lobby_tree.grid(row=0, column=0, sticky="nsew")
+        scroll = ttk.Scrollbar(listing, orient="vertical", command=self.lobby_tree.yview)
+        scroll.grid(row=0, column=1, sticky="ns")
+        self.lobby_tree.configure(yscrollcommand=scroll.set)
+        horizontal = ttk.Scrollbar(listing, orient="horizontal", command=self.lobby_tree.xview)
+        horizontal.grid(row=1, column=0, sticky="ew")
+        self.lobby_tree.configure(xscrollcommand=horizontal.set)
+        self.results_var = tk.StringVar(value="Log in through Account & Security to discover live lobbies.")
+        ttk.Label(listing, textvariable=self.results_var, style="Small.TLabel", wraplength=500).grid(row=2, column=0, sticky="w", pady=12)
         self.lobby_tree.bind("<<TreeviewSelect>>", self.choose_lobby)
-        self.lobby_desc = tk.StringVar(value="Select a lobby to read the requirements.")
-        ttk.Label(t, textvariable=self.lobby_desc, style="Small.TLabel", wraplength=1000).pack(anchor="w", pady=7)
-        join_form = ttk.Frame(t)
-        join_form.pack(fill="x", pady=7)
-        join_form.columnconfigure(1, weight=1)
+        detail_shell = ttk.Frame(body, style="Panel.TFrame")
+        detail_shell.grid(row=0, column=1, sticky="nsew")
+        detail_canvas = tk.Canvas(detail_shell, background=PANEL, highlightthickness=0, width=300)
+        detail_scroll = ttk.Scrollbar(detail_shell, orient="vertical", command=detail_canvas.yview)
+        detail_scroll.pack(side="right", fill="y")
+        detail_canvas.pack(side="left", fill="both", expand=True)
+        detail_canvas.configure(yscrollcommand=detail_scroll.set)
+        detail = ttk.Frame(detail_canvas, style="Panel.TFrame", padding=16)
+        detail_window = detail_canvas.create_window(0, 0, window=detail, anchor="nw")
+        detail.bind("<Configure>", lambda _: detail_canvas.configure(scrollregion=detail_canvas.bbox("all")))
+        detail_canvas.bind("<Configure>", lambda event: detail_canvas.itemconfigure(detail_window, width=event.width))
+        self.detail_title = tk.StringVar(value="Select a lobby")
+        ttk.Label(detail, textvariable=self.detail_title, style="CardTitle.TLabel", wraplength=260).pack(anchor="w", pady=(2, 16))
+        self.lobby_desc = tk.StringVar(value="Choose a room to view its platform and emulator requirements.")
+        ttk.Label(detail, textvariable=self.lobby_desc, style="Card.TLabel", wraplength=260, justify="left").pack(anchor="w")
+        ttk.Separator(detail).pack(fill="x", pady=18)
+        ttk.Label(detail, text="Select your local game to check compatibility.", style="CardMuted.TLabel", wraplength=260).pack(anchor="w", pady=(0, 12))
         self.join_path = tk.StringVar()
-        self.label(join_form, "Your game file / folder", 0)
-        self.entry(join_form, self.join_path, 0)
-        ttk.Button(join_form, text="File", command=lambda: self.pick_file(self.join_path)).grid(row=0,column=2,padx=4)
-        ttk.Button(join_form, text="Folder", command=lambda: self.pick_folder(self.join_path)).grid(row=0,column=3,padx=4)
-        row = ttk.Frame(t)
-        row.pack(anchor="w")
-        ttk.Button(row, text="Verify game + join", style="Accent.TButton", command=self.join_game).pack(side="left", padx=(0, 10))
-        ttk.Button(row, text="Set up selected emulator", command=self.setup_selected).pack(side="left")
+        ttk.Entry(detail, textvariable=self.join_path, width=26).pack(fill="x", pady=(0, 8))
+        pickers = ttk.Frame(detail, style="Panel.TFrame")
+        pickers.pack(fill="x")
+        ttk.Button(pickers, text="Choose file", command=lambda: self.pick_file(self.join_path)).pack(side="left", expand=True, fill="x", padx=(0, 4))
+        ttk.Button(pickers, text="Folder", command=lambda: self.pick_folder(self.join_path)).pack(side="left")
+        self.join_button = ttk.Button(detail, text="Verify & Join", style="Accent.TButton", command=self.join_game, state="disabled")
+        self.join_button.pack(fill="x", pady=12)
+        self.profile_status = tk.StringVar(value="Select a lobby to check your emulator profile.")
+        ttk.Label(detail, text="Your emulator", style="Card.TLabel").pack(anchor="w", pady=(18, 8))
+        ttk.Label(detail, textvariable=self.profile_status, style="CardMuted.TLabel", wraplength=260).pack(anchor="w")
+        ttk.Button(detail, text="Manage setup", command=self.setup_selected).pack(fill="x", pady=12)
+        for variable in (self.search_var, self.platform_filter, self.mode_filter):
+            variable.trace_add("write", lambda *_: self.render_lobbies())
+
+    def render_lobbies(self):
+        selected = self.selected_lobby_id()
+        query = self.search_var.get().strip().casefold()
+        platform = self.platform_filter.get()
+        mode = self.mode_filter.get()
+        self.lobby_tree.delete(*self.lobby_tree.get_children())
+        for room_id, room in self.rooms.items():
+            if query and query not in (room["game_title"] + " " + room["host"]).casefold():
+                continue
+            if platform != "All platforms" and platform != room["platform"]:
+                continue
+            if mode != "All play methods" and mode != room["mode"]:
+                continue
+            self.lobby_tree.insert("", "end", iid=room_id, values=(room["game_title"], room["platform"],
+                room["mode"], f"{room['players']} / {room['max_players']}"),
+                tags=("alternate",) if len(self.lobby_tree.get_children()) % 2 else ())
+        if selected and self.lobby_tree.exists(selected):
+            self.lobby_tree.selection_set(selected)
+        self.choose_lobby()
+        count = len(self.lobby_tree.get_children())
+        self.results_var.set(f"{count} matching lobby/lobbies" if count else
+                            ("No matching lobbies. Adjust filters or host a game." if self.api.token else
+                             "Log in through Account & Security to discover live lobbies."))
 
     def build_room(self):
         t = self.room_tab
         self.section(t, "Your waiting room")
         self.room_heading = tk.StringVar(value="No active room. Host a game or join an existing lobby.")
         ttk.Label(t, textvariable=self.room_heading, wraplength=950).pack(anchor="w", pady=5)
-        self.members_heading = tk.StringVar(value="Players: —")
+        self.members_heading = tk.StringVar(value="Players: -")
         ttk.Label(t, textvariable=self.members_heading).pack(anchor="w", pady=5)
-        self.connect_heading = tk.StringVar(value="Connection: —")
+        self.connect_heading = tk.StringVar(value="Connection: -")
         ttk.Label(t, textvariable=self.connect_heading, style="Small.TLabel", wraplength=970).pack(anchor="w", pady=5)
         tools = ttk.Frame(t)
         tools.pack(anchor="w", pady=(10, 5))
@@ -475,6 +610,9 @@ class RetroRelayApp(tk.Tk):
             self.api = API(url)
             self.username = None
             self.current_room = None
+            self.rooms = {}
+            self.render_lobbies()
+            self.update_identity()
         return self.api
 
     def login(self):
@@ -485,7 +623,9 @@ class RetroRelayApp(tk.Tk):
         def done(res):
             api.token = res["token"]
             self.username = res["username"]
-            self.status_var.set("Online • logged in as " + self.username)
+            self.update_identity()
+            self.login_pass.set("")
+            self.status_var.set("Online | logged in as " + self.username)
             self.notebook.select(self.discover_tab)
             self.refresh_lobbies()
         username, password = self.login_user.get(), self.login_pass.get()
@@ -509,7 +649,7 @@ class RetroRelayApp(tk.Tk):
         except ValueError as exc:
             return self.report_error(str(exc))
         self.bg(lambda: api.call("GET", "/health"),
-                lambda _: self.status_var.set("Lobby server is reachable • Internet/network OK"),
+                lambda _: self.status_var.set("Lobby server is reachable | Internet/network OK"),
                 "Checking server connection...")
 
     def logout(self):
@@ -522,7 +662,11 @@ class RetroRelayApp(tk.Tk):
         self.api.token = None
         self.username = None
         self.current_room = None
-        self.status_var.set("Offline • log in to connect to the lobby server")
+        self.rooms = {}
+        self.render_lobbies()
+        self.update_identity()
+        self.login_pass.set("")
+        self.status_var.set("Offline | log in to connect to the lobby server")
         self.notebook.select(self.account_tab)
 
     def load_profile(self):
@@ -618,7 +762,7 @@ class RetroRelayApp(tk.Tk):
             self.clear_chat()
             self.notebook.select(self.room_tab)
             self.refresh_room()
-            self.status_var.set("Room " + result["id"] + " created • waiting for friends")
+            self.status_var.set("Room " + result["id"] + " created | waiting for friends")
         self.bg(operation, done, "Hashing every byte of your game, then creating lobby...")
 
     def refresh_lobbies(self, quiet=False):
@@ -630,15 +774,7 @@ class RetroRelayApp(tk.Tk):
         def done(rows):
             self.lobby_polling = False
             self.rooms = {r["id"]: r for r in rows}
-            selected = self.selected_lobby_id()
-            for item in self.lobby_tree.get_children():
-                self.lobby_tree.delete(item)
-            for r in rows:
-                self.lobby_tree.insert("", "end", iid=r["id"], values=(
-                    r["game_title"], r["platform"], r["emulator"] + " " + r["emulator_version"],
-                    r["mode"], str(r["players"]) + "/" + str(r["max_players"])))
-            if selected and selected in self.rooms:
-                self.lobby_tree.selection_set(selected)
+            self.render_lobbies()
             if not quiet:
                 self.status_var.set(str(len(rows)) + " live lobby/lobbies found")
         def work():
@@ -663,14 +799,24 @@ class RetroRelayApp(tk.Tk):
 
     def choose_lobby(self, _event=None):
         room_id = self.selected_lobby_id()
-        if room_id and room_id in self.rooms:
-            room = self.rooms[room_id]
-            self.lobby_desc.set(
-                f"{room['game_title']}  •  hosted by {room['host']}  •  Room ID {room_id}\n"
-                f"Required: {room['emulator']} {room['emulator_version']}"
-                + (f"  |  Core: {room['core_name']} {room['core_version']}" if room["core_name"] else "")
-                + f"\nMode: {MODES.get(room['mode'], room['mode'])}  •  {room['notes']}"
-            )
+        if not room_id or room_id not in self.rooms:
+            self.detail_title.set("Select a lobby")
+            self.lobby_desc.set("Choose a room to view its platform and emulator requirements.")
+            self.profile_status.set("Select a lobby to check your emulator profile.")
+            self.join_button.state(["disabled"])
+            return
+        room = self.rooms[room_id]
+        self.detail_title.set(room["game_title"])
+        self.lobby_desc.set(
+            f"Hosted by {room['host']}\n\nPlatform: {room['platform']}\n"
+            f"Play method: {room['mode']}\nPlayers: {room['players']} of {room['max_players']}\n"
+            f"Emulator: {room['emulator']} {room['emulator_version']}"
+            + (f"\nCore: {room['core_name']} {room['core_version']}" if room.get("core_name") else "")
+            + "\nGame match: Not checked"
+            + ("\n\n" + room["notes"] if room.get("notes") else ""))
+        profile = self.settings.get("profiles", {}).get(profile_key(room["platform"], room["emulator"]))
+        self.profile_status.set(f"{room['emulator']} profile saved" if profile else "Emulator setup required")
+        self.join_button.state(["!disabled"] if self.api.token and room['players'] < room['max_players'] else ["disabled"])
 
     def setup_selected(self):
         room_id = self.selected_lobby_id()
@@ -717,7 +863,7 @@ class RetroRelayApp(tk.Tk):
             self.clear_chat()
             self.notebook.select(self.room_tab)
             self.refresh_room()
-            self.status_var.set("Joined room " + result + " • game hash and versions matched")
+            self.status_var.set("Joined room " + result + " | game hash and versions matched")
         self.bg(operation, done, "Verifying full game SHA-256 and joining...")
 
     def clear_chat(self):
@@ -750,9 +896,9 @@ class RetroRelayApp(tk.Tk):
             return
         room, messages = result
         self.current_room = room
-        self.room_heading.set(f"{room['game_title']}  •  {room['platform']}  •  {room['emulator']} {room['emulator_version']}  •  Room {room_id}")
+        self.room_heading.set(f"{room['game_title']}  |  {room['platform']}  |  {room['emulator']} {room['emulator_version']}  |  Room {room_id}")
         self.members_heading.set("Players: " + "    |    ".join(
-            m["username"] + (" ✓ READY" if m["ready"] else " • waiting") for m in room["members"]))
+            m["username"] + (" READY: READY" if m["ready"] else " | waiting") for m in room["members"]))
         self.current_ready = next((m["ready"] for m in room["members"] if m["username"] == self.username), False)
         self.connect_heading.set("Method: " + MODES.get(room["mode"], room["mode"]) +
                                  "\nConnect info (room members only): " + (room["connection_hint"] or "Host has not posted details yet"))
@@ -815,8 +961,8 @@ class RetroRelayApp(tk.Tk):
             self.current_room = None
             self.last_msg_id = 0
             self.room_heading.set("You have left the room.")
-            self.members_heading.set("Players: —")
-            self.connect_heading.set("Connection: —")
+            self.members_heading.set("Players: -")
+            self.connect_heading.set("Connection: -")
             self.clear_chat()
             self.notebook.select(self.discover_tab)
             self.refresh_lobbies()
@@ -827,7 +973,7 @@ class RetroRelayApp(tk.Tk):
             return
         self.clipboard_clear()
         self.clipboard_append(self.current_room["id"])
-        self.status_var.set("Room ID copied • friends can find it using the same lobby server")
+        self.status_var.set("Room ID copied | friends can find it using the same lobby server")
 
     def start_play(self):
         room = self.current_room

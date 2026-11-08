@@ -1,20 +1,20 @@
-# Nexus Relay — Retro Relay Online module
+# RetroRelay — Classic Multiplayer Hub
 
-**This codebase is now a component of [Nexus Relay's unified GitHub home page](https://github.com/Cardsmageanime/Arcade-Nexus).**
+## Desktop interface
 
-Nexus Relay combines the Arcade World, Gaming History Museum, RetroRelay PC multiplayer client/server, planned licensed Store, and ARM external-boot Systems Edition into one product vision. This repository retains the **existing RetroRelay implementation and history** during integration; no files have been erased or falsely represented as merged.
+RetroRelay now has a navy-and-teal desktop layout based on the approved interface concept:
 
-- [Unified product home](https://github.com/Cardsmageanime/Arcade-Nexus)
-- [ARM systems foundation](https://github.com/Cardsmageanime/RetroVerse/tree/milestone/arm64-kernel-build-20261023)
-- **Original artwork only**; no third-party game art or assets without explicit permission.
-- **Phases 1–5 only**; Phase 6 is reserved for joint planning.
-- Existing networking service is a starter, not a hardened or publicly hosted Nexus Relay network.
+- Sidebar navigation for **Find Games**, **Host Game**, **Waiting Room**, **Emulator Setup**, **Library & Achievements**, and **Account & Security**.
+- Search live lobbies by game or host, filter by platform and play method, then inspect the selected room's emulator/core requirements.
+- Choose a local game file or folder and use **Verify & Join** with the existing game fingerprint and version checks.
+- Account identity, offline/empty states, scrollable room details and existing hosting/chat/readiness/launch operations.
+- **Library & Achievements is a planned-feature screen**, not working provider connections. Account & Security uses the existing login; phone MFA is not implemented in this main-branch build.
 
-## Historical RetroRelay technical instructions
+![Actual desktop interface, signed out](docs/images/desktop-interface.png)
 
-The original README is retained below for compatibility and learning.
+This is the running Tkinter interface, not the earlier generated concept image. It uses native desktop widgets; the screenshot shows an empty signed-out state, without invented live games. Windows/Linux launch commands remain below. Minimum window size: 1180 × 780; default: 1380 × 850. Physical Windows/Linux, emulator and two-PC acceptance testing remains necessary before a release.
 
----
+Desktop interaction tests require a display: `xvfb-run -a python -m pytest -q` on a Linux machine with Xvfb installed. Ordinary headless runs skip those tests.
 
 # RetroRelay — Classic Multiplayer Hub (Starter v0.1)
 
@@ -41,10 +41,10 @@ The original README is retained below for compatibility and learning.
 
 1. Install [Python 3.11+](https://www.python.org/downloads/) and check **Add python.exe to PATH** when installing. Extract this project folder.
 2. Double-click **`START_HUB_WINDOWS.bat`** on the PC that will host the *lobby server*. It installs dependencies in a local virtual environment automatically. Keep the terminal running.
-3. Double-click **`START_APP_WINDOWS.bat`**. On the `Account` tab, keep the default server URL `http://127.0.0.1:8751`. Create an account; then log in.
+3. Double-click **`START_APP_WINDOWS.bat`**. On `Account & Security`, keep the default server URL `http://127.0.0.1:8751`. Create an account; then log in.
 4. On `Emulator Setup`, select a console and emulator. Browse to the emulator executable, enter its **exact installed version**, and save. RetroArch users also enter the **core name, core version and installed core `.dll` file**.
 5. On `Host Game`, choose game, matching file or folder, and multiplayer method. Click **Create room + check my game**. The app calculates a full SHA-256 fingerprint. For RetroArch the host should provide an address reachable by other players, typically `your-public-IP:55435` or a Hamachi VPN address; it is for the emulator netplay connection, not the lobby server.
-6. On the other PC, install the app and emulator, set its **lobby server URL** to your shared HTTPS server URL (see below), register a different account and enter their own emulator profile. Go to `Find Games`, select your lobby and choose their local copy of the *exact same game*. Click **Verify game + join**.
+6. On the other PC, install the app and emulator, set its **lobby server URL** to your shared HTTPS server URL (see below), register a different account and enter their own emulator profile. Go to `Find Games`, select your lobby and choose their local copy of the *exact same game*. Click **Verify & Join**.
 7. Use `Waiting Room` to chat, mark ready and press **Launch emulator / play**. RetroArch classic netplay starts via command-line; Dolphin, Parsec, and game-network modes provide guided/manual setup.
 
 ## First play session — Linux / Bazzite
