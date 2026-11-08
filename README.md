@@ -12,7 +12,7 @@ RetroRelay now has a navy-and-teal desktop layout based on the approved interfac
 
 ![Actual desktop interface, signed out](docs/images/desktop-interface.png)
 
-This is the running Tkinter interface, not the earlier generated concept image. It uses native desktop widgets; the screenshot shows an empty signed-out state, without invented live games. Windows/Linux launch commands remain below. Minimum window size: 1180 × 780; default: 1380 × 850. Physical Windows/Linux, emulator and two-PC acceptance testing remains necessary before a release.
+This is the running Tkinter interface, styled to follow the owner-approved enhanced preview. It uses native desktop widgets; the screenshot shows an empty signed-out state, without invented live games. Windows/Linux launch commands remain below. Minimum window size: 1180 × 780; preferred layout: 1672 × 890, automatically reduced for smaller displays. Fonts prefer Segoe UI on Windows and Liberation Sans on Linux, with installed sans-serif fallbacks. The desktop uses the operating system’s text rendering, so font appearance can vary by system. Physical Windows/Linux, emulator and two-PC acceptance testing remains necessary before a release.
 
 Desktop interaction tests require a display: `xvfb-run -a python -m pytest -q` on a Linux machine with Xvfb installed. Ordinary headless runs skip those tests.
 
