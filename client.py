@@ -20,7 +20,7 @@ import urllib.request
 import webbrowser
 from urllib.parse import urlsplit
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, ttk, font as tkfont
 
 from catalog import MODES, PLATFORMS, compatible_mode
 
@@ -185,18 +185,21 @@ class RetroRelayApp(tk.Tk):
         self.after(5000, self.poll)
 
     def setup_style(self):
+        families = set(tkfont.families(self))
+        self.ui_font = next((name for name in ("Segoe UI", "Noto Sans", "Noto Sans Display", "DejaVu Sans", "Arial")
+                             if name in families), "Arial")
         style = ttk.Style(self)
         style.theme_use("clam")
         style.configure("TFrame", background=BG)
         style.configure("Panel.TFrame", background=PANEL)
-        style.configure("TLabel", background=BG, foreground=FG, font=("Arial", 10))
-        style.configure("Header.TLabel", background=BG, foreground=FG, font=("Arial", 18, "bold"))
-        style.configure("Small.TLabel", background=BG, foreground=SUBTLE, font=("Arial", 10))
-        style.configure("TButton", font=("Arial", 10), padding=(12, 7), background="#263c54",
+        style.configure("TLabel", background=BG, foreground=FG, font=(self.ui_font, 11))
+        style.configure("Header.TLabel", background=BG, foreground=FG, font=(self.ui_font, 21, "bold"))
+        style.configure("Small.TLabel", background=BG, foreground="#bdcbe0", font=(self.ui_font, 10))
+        style.configure("TButton", font=(self.ui_font, 10, "bold"), padding=(12, 7), background="#263c54",
                         foreground=FG, borderwidth=0, relief="flat", bordercolor="#263c54",
                         lightcolor="#263c54", darkcolor="#263c54")
         style.map("TButton", background=[("active", "#34536e")], foreground=[("disabled", SUBTLE)])
-        style.configure("Accent.TButton", background="#1da994", foreground="#ffffff", font=("Arial", 10, "bold"))
+        style.configure("Accent.TButton", background="#1da994", foreground="#ffffff", font=(self.ui_font, 10, "bold"))
         style.map("Accent.TButton", background=[("active", "#188777")])
         style.configure("TEntry", padding=7, fieldbackground=PANEL, foreground=FG,
                         insertcolor=FG, bordercolor="#34536e", lightcolor=PANEL, darkcolor=PANEL)
@@ -208,24 +211,28 @@ class RetroRelayApp(tk.Tk):
         style.configure("TNotebook.Tab", padding=(20, 11), background=PANEL, foreground=FG)
         style.map("TNotebook.Tab", background=[("selected", "#28415a")], foreground=[("selected", "white")])
         style.configure("Treeview", background=PANEL, fieldbackground=PANEL, foreground=FG, rowheight=31, borderwidth=0)
-        style.configure("Treeview.Heading", background="#263c54", foreground=FG, font=("Arial", 10, "bold"))
+        style.configure("Treeview.Heading", background="#263c54", foreground=FG, font=(self.ui_font, 10, "bold"))
         style.map("Treeview", background=[("selected", "#275867")], foreground=[("selected", "white")])
         style.configure("TSpinbox", padding=5)
         style.layout("Sidebar.TNotebook.Tab", [])
         style.configure("Sidebar.TNotebook", background=BG, borderwidth=0)
         style.layout("Sidebar.TNotebook", [("Notebook.client", {"sticky": "nswe"})])
-        style.configure("Nav.TButton", anchor="w", padding=(18, 16), background=PANEL, foreground=FG)
+        style.configure("Nav.TButton", font=(self.ui_font, 11, "bold"), anchor="w", padding=(18, 16), background=PANEL, foreground=FG)
         style.map("Nav.TButton", background=[("pressed", "#275867"), ("active", "#263c54")])
-        style.configure("Selected.Nav.TButton", anchor="w", padding=(18, 16), background="#275867", foreground=ACCENT)
-        style.configure("Title.TLabel", background=BG, foreground=FG, font=("Arial", 25, "bold"))
-        style.configure("Card.TLabel", background=PANEL, foreground=FG, font=("Arial", 11))
-        style.configure("CardTitle.TLabel", background=PANEL, foreground=FG, font=("Arial", 19, "bold"))
-        style.configure("CardMuted.TLabel", background=PANEL, foreground=SUBTLE, font=("Arial", 10))
-        style.configure("Treeview", rowheight=68, font=("Arial", 11))
-        style.configure("Treeview.Heading", padding=(8, 12))
+        style.configure("Selected.Nav.TButton", font=(self.ui_font, 11, "bold"), anchor="w", padding=(18, 16), background="#275867", foreground=ACCENT)
+        style.configure("Title.TLabel", background=BG, foreground=FG, font=(self.ui_font, 28, "bold"))
+        style.configure("Card.TLabel", background=PANEL, foreground=FG, font=(self.ui_font, 11, "bold"))
+        style.configure("CardTitle.TLabel", background=PANEL, foreground=FG, font=(self.ui_font, 20, "bold"))
+        style.configure("CardMuted.TLabel", background=PANEL, foreground="#bdcbe0", font=(self.ui_font, 10))
+        style.configure("Treeview", rowheight=68, font=(self.ui_font, 11, "bold"))
+        style.configure("Treeview.Heading", padding=(8, 12), font=(self.ui_font, 10, "bold"))
+        style.configure("Field.TLabel", background=BG, foreground=FG, font=(self.ui_font, 10, "bold"))
+        style.configure("TEntry", font=(self.ui_font, 11))
+        style.configure("TCombobox", font=(self.ui_font, 10))
+        self.option_add("*TCombobox*Listbox.font", (self.ui_font, 10))
 
     def label(self, parent, text, r, c=0, sticky="w", width=None):
-        lbl = ttk.Label(parent, text=text)
+        lbl = ttk.Label(parent, text=text, style="Field.TLabel")
         lbl.grid(row=r, column=c, sticky=sticky, padx=7, pady=7)
         return lbl
 
@@ -267,7 +274,7 @@ class RetroRelayApp(tk.Tk):
         for name, page in [
             ("Find Games", self.discover_tab), ("Host Game", self.host_tab),
             ("Waiting Room", self.room_tab), ("Emulator Setup", self.setup_tab),
-            ("Library & Achievements", self.library_tab), ("Account & Security", self.account_tab),
+            ("Library &\nAchievements", self.library_tab), ("Account & Security", self.account_tab),
         ]:
             self.notebook.add(page, text=name)
             button = ttk.Button(sidebar, text=name, style="Nav.TButton",
@@ -441,7 +448,7 @@ class RetroRelayApp(tk.Tk):
         search = ttk.Entry(toolbar, textvariable=self.search_var, width=20)
         search.grid(row=0, column=0, sticky="ew", padx=(0, 8))
         # Visible label remains available to keyboard and screen-reader users.
-        ttk.Label(toolbar, text="Search games or hosts", style="Small.TLabel").grid(row=1, column=0, sticky="w", pady=4)
+        ttk.Label(toolbar, text="Search games or hosts", style="Field.TLabel").grid(row=1, column=0, sticky="w", pady=4)
         ttk.Combobox(toolbar, textvariable=self.platform_filter, values=["All platforms", *PLATFORMS],
                      state="readonly", width=19).grid(row=0, column=1, padx=4)
         ttk.Combobox(toolbar, textvariable=self.mode_filter, values=["All play methods", *MODES],
@@ -552,7 +559,7 @@ class RetroRelayApp(tk.Tk):
         self.entry(hint, self.connection_edit, 0)
         ttk.Button(hint, text="Host: update", command=self.update_connection).grid(row=0,column=2,padx=5)
         self.chat_view = tk.Text(t, height=14, bg=PANEL, fg=FG, insertbackground=FG,
-                                 highlightthickness=0, wrap="word", font=("Arial", 10))
+                                 highlightthickness=0, wrap="word", font=(self.ui_font, 11))
         self.chat_view.pack(fill="both", expand=True)
         self.chat_view.configure(state="disabled")
         chat_row = ttk.Frame(t)
