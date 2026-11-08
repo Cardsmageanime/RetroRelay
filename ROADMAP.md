@@ -1,7 +1,7 @@
 # RetroRelay — Development Roadmap (2026–2028)
 
 **Project:** [RetroRelay](https://github.com/Cardsmageanime/RetroRelay)  
-**Roadmap last consolidated:** October 22, 2026  
+**Roadmap last consolidated:** November 8, 2026  
 **Status convention:** **Published** = verified GitHub Release; **In review** = code proposed in a pull request but not released; **Planned** = feature requirements exist, but shipping has not been verified.  
 **Release policy:** Dates below are *reviews/targets*, not guaranteed release dates. Ship meaningful changes only after testing, security review, documentation, and honest compatibility notes.
 
@@ -23,12 +23,14 @@ RetroRelay is a beginner-friendly, self-hostable hub connecting players of class
 |---|---|---|---|---|
 | October 2026 | v0.1.0 | Source-code starter with accounts, compatible-game lobbies, chat, match checks and emulator launch helpers | **Published early preview** | [Release v0.1.0](https://github.com/Cardsmageanime/RetroRelay/releases/tag/v0.1.0) |
 | **October 20, 2026** | **v0.2.0** | Social profile links, controller discovery/registration, lobby artwork, Parsec controller-only guest rooms and phone-authenticator MFA security preview | **In review** (not published) | [PR #2](https://github.com/Cardsmageanime/RetroRelay/pull/2), [MFA Issue #9](https://github.com/Cardsmageanime/RetroRelay/issues/9), [Issue #6](https://github.com/Cardsmageanime/RetroRelay/issues/6) |
+| **December 2026** | **v0.7.0** | Opt-in Steam and **GOG GALAXY** and Epic Games library/achievement showcases, plus RetroAchievements points and badges | **Planned** | [Issue #8](https://github.com/Cardsmageanime/RetroRelay/issues/8) |
 | **January 16, 2027** | **v0.3.0** | Twitch account authorization, OBS-assisted broadcasting, separate Twitch and RetroRelay lobby chats, streamer dashboard | **Planned** | [Issue #3](https://github.com/Cardsmageanime/RetroRelay/issues/3) |
 | **April 16, 2027** | **v0.4.0** | Low-latency netplay/rollback where emulator supports it, network diagnostics and controller input test/remapping wizard | **Planned** | [Issue #4](https://github.com/Cardsmageanime/RetroRelay/issues/4) |
 | **August 16, 2027** | **v0.5.0** | Social gaming profiles, app/room themes, licensed or user-owned images, free Relay Store, OBS controller-display overlays | **Planned** | [Issue #5](https://github.com/Cardsmageanime/RetroRelay/issues/5) |
 | **November 16, 2027** | **v0.6.0** | Arcade Network: compatibility-aware Quick Match, tournaments/leaderboards, friends/parties/clubs, spectating, moderation and fair-play | **Planned** | [Issue #7](https://github.com/Cardsmageanime/RetroRelay/issues/7) |
-| **February 16, 2028** | **v0.7.0** | Opt-in Steam and **GOG GALAXY** and Epic Games library/achievement showcases, plus RetroAchievements points and badges | **Planned** | [Issue #8](https://github.com/Cardsmageanime/RetroRelay/issues/8) |
 | **March 2028** | **Version TBD** | Cross-platform achievement/trophy sharing hub for Sony PlayStation, Xbox, Nintendo goals and Steam, where provider data is available and authorized | **Planned** | [Issue #12](https://github.com/Cardsmageanime/RetroRelay/issues/12) |
+
+Version labels are retained from the existing plan; release numbering will be reviewed before publication because the showcase now targets December 2026.
 
 ## Phase-by-phase acceptance goals
 
@@ -44,6 +46,16 @@ RetroRelay is a beginner-friendly, self-hostable hub connecting players of class
 - Rights-cleared host-supplied artwork previews, international titles, and lobby images; no bundled unlicensed game art library.
 - Native emulator multiplayer requires compatible ROM/game hashes and emulator/core versions. Parsec mode permits controller-only guests but **Parsec handles the stream**; hosts must configure it separately. No unauthorized commercial ROM sharing.
 - Validate CI plus real desktop and hardware testing, then decide whether to merge [PR #2](https://github.com/Cardsmageanime/RetroRelay/pull/2) and publish a source-only prerelease.
+
+### December 2026 — v0.7.0 Gaming Library & Achievement Showcase
+
+- **Steam:** opt-in games and per-game achievements using supported APIs and user library visibility.
+- **GOG GALAXY:** the owner confirmed this is the intended “GG Galaxy” library. Investigate authorized library and achievement visibility; manual/local fallback if official comprehensive APIs are not available.
+- **Epic Games:** approved account and achievement access where APIs permit; mark unsupported synchronization accurately.
+- **RetroAchievements:** read-only earned badges, completion data and points with documented API authorization.
+- Gaming profile cards with favorite games, pinned showcases and per-source points/achievement labels. **No invented unified official gamer score**.
+- Secure provider permissions, no passwords/scraped private sessions, private-by-default visibility and disconnect/deletion settings.
+- Details: [Issue #8](https://github.com/Cardsmageanime/RetroRelay/issues/8).
 
 ### January 2027 — v0.3.0 Streaming & dual chat
 
@@ -84,23 +96,13 @@ All five owner-approved tracks:
 
 Details: [Issue #7](https://github.com/Cardsmageanime/RetroRelay/issues/7).
 
-### February 2028 — v0.7.0 Gaming Library & Achievement Showcase
-
-- **Steam:** opt-in games and per-game achievements using supported APIs and user library visibility.
-- **GOG GALAXY:** the owner confirmed this is the intended “GG Galaxy” library. Investigate authorized library and achievement visibility; manual/local fallback if official comprehensive APIs are not available.
-- **Epic Games:** approved account and achievement access where APIs permit; mark unsupported synchronization accurately.
-- **RetroAchievements:** read-only earned badges, completion data and points with documented API authorization.
-- Gaming profile cards with favorite games, pinned showcases and per-source points/achievement labels. **No invented unified official gamer score**.
-- Secure provider permissions, no passwords/scraped private sessions, private-by-default visibility and disconnect/deletion settings.
-- Details: [Issue #8](https://github.com/Cardsmageanime/RetroRelay/issues/8).
-
 ### March 2028 — Cross-Platform Achievements, Trophies & Goals Hub
 
 - **One RetroRelay profile** to showcase earned PlayStation trophies, Xbox achievements, Nintendo missions/goals and Steam achievements across supported generations, with optional online sharing.
 - **Sony PlayStation:** pursue authorized PSN trophy read access for supported consoles, including PS3/PS4/PS5 where permitted. Older systems without trophies or available API data must not be represented as synced.
 - **Xbox:** pursue authorized earned achievements from Xbox 360, Xbox One, Xbox Series and supported PC titles. The original Xbox had no platform-wide achievements; any RetroRelay-created goals must be labeled separately.
 - **Nintendo:** show authorized Nintendo Switch Online Missions & Rewards/My Nintendo activity only if suitable access is available. Nintendo does not offer a universal systemwide achievements service across all consoles; provide separately labeled optional RetroRelay goals for unsupported generations.
-- **Steam:** build on the February 2028 integration and supported Steam achievement APIs. Preserve GOG GALAXY, Epic Games and RetroAchievements where feasible.
+- **Steam:** build on the December 2026 integration and supported Steam achievement APIs. Preserve GOG GALAXY, Epic Games and RetroAchievements where feasible.
 - Display game, source platform, earned badge/trophy, official source score or tier (where applicable), earned date and verification status. **Never fabricate a unified official gamer score or claim to unlock official achievements.**
 - **Privacy and security:** accounts connected only with consent and authorized interfaces; profiles private by default, per-source sharing controls, revocation/deletion, token protection, API rate limits, honest unsupported status.
 - This is a **cross-platform achievements showcase**, not a change to RetroRelay's emulator/platform-play support list above. It does not grant multiplayer or game-launch support for all PlayStation, Xbox and Nintendo consoles.
