@@ -1,0 +1,30 @@
+name: Release download metrics
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 12 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  count-release-assets:
+    if: github.repository == 'Cardsmageanime/RetroRelay'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Collect GitHub release asset download counts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python scripts/release_download_metrics.py
+      - name: Save count snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-download-metrics
+          path: release-download-metrics.json
+          retention-days: 90
